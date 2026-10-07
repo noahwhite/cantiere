@@ -12,17 +12,29 @@ Model spend must be metered per session and hard-capped (COST-1, COST-2), and de
 The terms differ by vendor:
 
 - [Anthropic](https://code.claude.com/docs/en/legal-and-compliance): subscription OAuth is for ordinary use of the unmodified Claude Code binary, which an end user may sign in to even where a platform hosts it. Products, including Agent SDK integrations, must use API keys. Developers "may not collect, store, or intermediate Claude.ai credentials or session tokens".
-- OpenAI: "Sign in with ChatGPT" for open-source, self-hosted apps (preview) explicitly supports [self-hosted VMs](https://developers.openai.com/siwc/token-sharing-open-source/self-hosted-vms.md) and passing the token to a Codex `app-server` child process.
+- OpenAI: "Sign in with ChatGPT" for open-source, self-hosted apps (preview) explicitly supports [self-hosted VMs](https://developers.openai.com/siwc/token-sharing-open-source/self-hosted-vms.md) and passing the token to a Codex `app-server` child process. ChatGPT Plus/Pro sign-in is also supported in [opencode](https://opencode.ai/docs/providers/), so OpenAI subscriptions are not tied to OpenAI's own CLI.
 
 ## Decision
 
 **API-key mode (default).**
 
-- Each runtime's base URL points at the worker's model gateway: `ANTHROPIC_BASE_URL`, Codex `model_providers` base URL, and opencode provider `baseURL`. The sandbox holds only a placeholder key.
+- Each runtime's base URL points at the worker's model gateway: `ANTHROPIC_BASE_URL` for Claude Code, and the ACP agent's provider base URL for everything else (opencode provider `baseURL`, Codex `model_providers`). The sandbox holds only a placeholder key.
+- This is how non-Anthropic and non-OpenAI models run: a persona picks an ACP agent and a model, and the gateway injects that provider's key. For example:
+
+  ```yaml
+  name: kimi-reviewer
+  runtime: acp
+  agent: opencode
+  model: moonshot/kimi-k3
+  secrets: [{provider: moonshot, ref: bws://<uuid>}]
+  github: {permissions: read, authoring: bot}
+  budget: {session_usd: 5}
+  ```
+
 - The gateway runs on the worker per session and does four things:
-  - injects the real key (Anthropic, OpenAI, Moonshot, Bedrock, Vertex, or any OpenAI-compatible endpoint);
+  - injects the real key (Anthropic, OpenAI, Bedrock, Vertex, or any OpenAI-compatible endpoint such as DeepSeek, Moonshot, OpenRouter or a local vLLM);
   - rejects requests for denied models (RT-3);
-  - reads token usage from responses to produce authoritative `cost` events (COST-1);
+  - reads token usage from responses and prices it from a per-model price table (input, output, cache read and cache write per million tokens) kept in the config repo (ADR-0017), producing authoritative `cost` events (COST-1); a model with no price entry is refused, so API-key spend is never unmetered;
   - refuses new requests once the session or daily budget is spent, which pauses the session to the inbox (COST-2).
 - Keys belong to the deployment or to individual users; per-user keys are used only for that user's sessions.
 
@@ -31,8 +43,8 @@ The terms differ by vendor:
 - Available only where the subscriber is the deployment's operator and the sandboxes run on infrastructure only they control, which matches Anthropic's "user signs in to the unmodified binary" allowance and OpenAI's "remote runtime only that user controls" wording most closely. Multi-user deployments cannot enable it.
 - Claude: the subscriber generates their own token with `claude setup-token` and stores it in their own secret-store scope. Cantiere places it in the environment of that subscriber's sessions, for the unmodified `claude` binary only. Storing the token is unavoidable for disposable sandboxes; this residual terms risk is stated in the setting's description.
 - Cantiere never routes subscription traffic through the gateway, never intercepts it (`pass` mode in ADR-0011), and never uses it with the Agent SDK.
-- Codex: the user's ChatGPT sign-in follows OpenAI's self-hosted flow, and the token is passed to the `app-server` child process.
-- Spend for subscription sessions is a notional API-equivalent figure from runtime `cost` events. Provider usage windows are tracked separately, and budgets apply to the notional figure.
+- ChatGPT: the user's sign-in follows OpenAI's self-hosted flow, and the token is passed to the ACP agent in that subscriber's sessions (`codex-acp`, which runs the Codex `app-server`, or opencode).
+- Spend for subscription sessions is a notional API-equivalent figure from runtime-reported usage (Claude Code `result` events, ACP `usage_update`), priced from the same table and marked as runtime-reported (ADR-0009). Provider usage windows are tracked separately, and budgets apply to the notional figure.
 - This answers the Phase 0 question: the broker will **not** hold or inject Claude subscription credentials, because that would intermediate them. COST-3's exception to ID-2 is permanent for subscription mode, and the docs say so.
 - Subscription mode is disabled by default; the operator enables it after reading the vendor terms, linked from the setting.
 - The model deny list (RT-3) cannot be enforced outside the sandbox in subscription mode, because that traffic is not intercepted; only the adapter enforces it.

@@ -22,7 +22,7 @@ flowchart TB
         gh_hooks[GitHub App webhooks]
     end
 
-    subgraph cp["cantiere-server (control plane)"]
+    subgraph cp["cantiere-server (control plane, Java + Quarkus)"]
         api[REST API + WebSocket]
         sess[Session and workflow engine - DBOS on Postgres]
         sched[Scheduler]
@@ -36,7 +36,7 @@ flowchart TB
     obj[(S3-compatible store)]
     secrets[(Secret store - BWS, Vault)]
 
-    subgraph worker["cantiere-worker (bare-metal host, one per box)"]
+    subgraph worker["cantiere-worker (Rust, bare-metal host, one per box)"]
         vmm[Firecracker + jailer]
         build[Blueprint builder + templates]
         subgraph netns["per-session network namespace"]
@@ -49,8 +49,8 @@ flowchart TB
     end
 
     subgraph vm["Sandbox microVM (one per session)"]
-        guest[cantiere-guest - runtime adapter, PTYs, tunnels]
-        agent[Claude Code / Codex / opencode]
+        guest[cantiere-guest - Rust, runtime adapter, PTYs, tunnels]
+        agent[Claude Code, or an ACP agent - opencode, Codex, Kimi CLI]
         dockerd[dockerd - Testcontainers, Postgres, Playwright]
         repos["/workspace/repo on session branch"]
     end
@@ -78,9 +78,9 @@ flowchart TB
 
 | Component | Owns | ADRs |
 | --- | --- | --- |
-| `cantiere-server` | API, UI, session workflows, scheduling, policy, audit, timeline, GitHub App, secret resolution | 0003, 0005, 0006, 0012, 0015, 0016 |
-| `cantiere-worker` | VMs, templates, network namespaces, egress and git proxies, push-time commit signing, model gateway, stream relay | 0007, 0008, 0010, 0011, 0012, 0013, 0014 |
-| `cantiere-guest` | Runtime adapters, event normalization, PTYs, editor and VNC tunnels, push wrapper | 0009, 0012, 0013 |
+| `cantiere-server` (Java, Quarkus) | API, UI, session workflows, scheduling, policy, audit, timeline, GitHub App, secret resolution | 0003, 0005, 0006, 0012, 0015, 0016 |
+| `cantiere-worker` (Rust) | VMs, templates, network namespaces, egress and git proxies, push-time commit signing, model gateway, stream relay | 0007, 0008, 0010, 0011, 0012, 0013, 0014 |
+| `cantiere-guest` (Rust) | Runtime adapters (Claude Code native, ACP), event normalization, slash-command discovery, PTYs, editor and VNC tunnels, push wrapper | 0009, 0012, 0013 |
 | Config repo | Personas, org blueprint layer, skills reference, workflows later | 0017 |
 | Target repos | `.agent/blueprint.yaml`, `CLAUDE.md` / `AGENTS.md` | 0008, 0009 |
 
@@ -103,13 +103,13 @@ sequenceDiagram
     W->>W: Clone template disks, set up netns, CA, proxies
     W->>G: Restore snapshot, connect over vsock
     G->>W: git fetch via git proxy, create session branch
-    G->>G: Start runtime adapter (Claude Code / Codex / opencode)
+    G->>G: Start runtime adapter (Claude Code, or ACP agent from Phase 2)
     loop Each turn
         G->>W: Model request with placeholder key
         W->>X: Inject key, check deny list, meter usage
         G-->>S: Events (scrubbed by worker) to timeline
         U-->>S: Message / take-over / approval
-        S-->>G: Delivered at next turn or via steer
+        S-->>G: Delivered at next turn (message or /command)
     end
     G->>W: git push (session branch)
     W->>W: Policy check, secret scan, recreate and sign commits
@@ -169,11 +169,13 @@ Each item's pass condition is written in its ADR.
 | 3 | Phase 0 | Density | 10 concurrent sessions on 16 cores / 64 GB without OOM | 0007 |
 | 4 | Phase 0 | Escape and egress | Root in guest cannot reach host, peers, metadata or non-allowlisted hosts (nftables only); all attempts logged | 0007, 0011 |
 | 5 | Phase 0 | Clone identity | Unique entropy, machine ID and network identity per restored clone | 0007 |
-| 6 | Phase 0 | Headless Claude Code end to end | One Claude Code session takes a prompt to a pushed branch with events streaming | 0009 |
-| 7 | Phase 1, slice 1 | CA and proxy trust | Claude Code, Codex, opencode, `git`, `gh`, Docker pulls, Maven and npm work through the proxy with the per-session CA | 0010, 0011 |
-| 8 | Phase 1, slice 1 | Model gateway | Each CLI runs end to end against the gateway with a placeholder key; usage metered | 0014 |
-| 9 | Phase 1, slice 1 | GitHub API policy | Session token cannot update refs, merge, or mutate other repos via REST or GraphQL | 0010 |
-| 10 | Phase 1, slice 1 | Push-time signing | Recreated bot and user commits show Verified and keep trees | 0012 |
+| 6 | Phase 0 | Firecracker client | `fctools` drives create, snapshot, restore, balloon and jailer launch for items 1 to 5; otherwise a client generated from `firecracker.yaml` | 0004, 0007 |
+| 7 | Phase 0 | Headless Claude Code end to end | One Claude Code session takes a prompt to a pushed branch with events streaming, and a user skill dispatched as `/name` runs | 0009 |
+| 8 | Phase 1, slice 1 | CA and proxy trust | Claude Code, `git`, `gh`, Docker pulls, Maven and npm work through the proxy with the per-session CA | 0010, 0011 |
+| 9 | Phase 1, slice 1 | Model gateway | Claude Code runs end to end against the gateway with a placeholder key; usage metered and priced from the config-repo price table | 0014 |
+| 10 | Phase 1, slice 1 | GitHub API policy | Session token cannot update refs, merge, or mutate other repos via REST or GraphQL | 0010 |
+| 11 | Phase 1, slice 1 | Push-time signing | Recreated bot and user commits show Verified and keep trees | 0012 |
+| 12 | Phase 1, slice 1 | Durable step atomicity | A DBOS step that writes a row through the jOOQ step factory and is killed before returning leaves both the row and the checkpoint, or neither | 0006 |
 
 The original Phase 0 item "test broker-held subscription credentials" is answered by research instead of a test: Anthropic's terms forbid intermediating subscription credentials, so the broker will not hold or inject them (ADR-0014).
 
@@ -182,3 +184,4 @@ The original Phase 0 item "test broker-held subscription credentials" is answere
 - [ ] Memory: keep file-based `MEMORY.md` or move to a store with a review UI (RT-5, Phase 3). Not needed for milestone 1; skills and memory mount read-only from the pinned skills commit (ADR-0008).
 - [ ] Which Hetzner dedicated model and location runs the first worker (16 cores / 64 GB or larger); Hetzner Cloud cannot host workers (ADR-0007).
 - [ ] Workflow script language for WF-2 (Phase 2), built on ADR-0006 primitives.
+- [ ] Which ACP agents the Phase 2 template ships (opencode and `codex-acp` at minimum), and whether each passes the ADR-0009 conformance suite.

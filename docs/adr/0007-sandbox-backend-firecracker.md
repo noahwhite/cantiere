@@ -20,7 +20,7 @@ Each session needs a VM-grade boundary (SEC-1), boot from a snapshot in under 30
 
 ## Decision
 
-- Sandboxes are **Firecracker microVMs** launched by `cantiere-worker` through the Firecracker jailer (chroot, seccomp, cgroups v2, unprivileged UID per VM).
+- Sandboxes are **Firecracker microVMs** launched by `cantiere-worker` through the Firecracker jailer (chroot, seccomp, cgroups v2, unprivileged UID per VM). The worker drives Firecracker's REST API through a `Vmm` trait; the client crate is chosen in Phase 0 (ADR-0004).
 - Worker hosts are **bare metal with `/dev/kvm`**: [Hetzner Cloud has no nested virtualization](https://docs.hetzner.com/cloud/servers/faq/), so Officina's workers are Hetzner dedicated servers; the control plane may run anywhere.
 - The guest runs a Cantiere-built kernel with overlayfs, netfilter, bridge, veth and cgroup v2, so `dockerd` runs inside the VM against its own ext4 data disk (`/var/lib/docker`), never the host's.
 - Disks per session are copy-on-write clones of template images (ADR-0008): reflink copies on an XFS pool in Phase 1, behind a `DiskStore` interface so an NBD overlay with diff export (E2B's approach) can replace it for pause/resume and multi-host moves.
@@ -37,6 +37,7 @@ Record the same measurements for the OpenHands runtime, Coder, the E2B runtime a
 3. 10 concurrent sessions running those suites on a 16-core / 64 GB host without OOM, with per-session CPU and memory caps holding.
 4. From root inside a guest, attempts to reach the host, other guests, the metadata network, or non-allowlisted egress all fail and are logged (with ADR-0011 in place).
 5. Restored clones get unique entropy, machine IDs and network identity (VMGenID / VMClock handling verified).
+6. The `fctools` crate drives create, snapshot, restore, balloon and jailer launch for items 1 to 5 at the pinned Firecracker version; otherwise the worker uses a client generated from `firecracker.yaml` and this item records why.
 
 ## Consequences
 

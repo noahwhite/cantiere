@@ -1,4 +1,4 @@
-# ADR-0019: Ship static binaries with systemd units; Compose only for the control plane
+# ADR-0019: Ship worker and guest as static binaries and the server as a self-contained Java app, with systemd units; Compose only for the control plane
 
 - Status: Accepted
 - Date: 2026-10-07
@@ -11,7 +11,11 @@ The worker manages KVM, TAP devices, nftables and block devices, which needs hos
 
 ## Decision
 
-- Releases publish static `cantiere-server`, `cantiere-worker` and `cantiere-guest` binaries for linux/amd64 and linux/arm64, signed with Sigstore cosign, plus a kernel and base rootfs for sandboxes.
+- Releases publish, for linux/amd64 and linux/arm64 and signed with Sigstore cosign:
+  - static `cantiere-worker` and `cantiere-guest` binaries (Rust, musl);
+  - `cantiere-server` as a Quarkus fast-jar bundled with a `jlink` Java runtime, so hosts need no JDK, and as a container image built from the same artifact;
+  - a kernel and base rootfs for sandboxes.
+- The server runs on the JVM, not as a GraalVM native image: startup time does not matter for a long-running service, and native images restrict the reflection that DBOS and gRPC rely on. Native images can be revisited later without changing the API.
 - `install.sh` (single host) checks for `/dev/kvm`, installs the binaries and systemd units, provisions Postgres (local package or a URL to an existing one), creates the storage pool for sandbox disks, and registers the local worker with a join token.
 - The worker runs as root under systemd with a restricted capability set and drops privileges per helper where possible; the server runs as an unprivileged user.
 - The installer configures the UI hostname and a separate wildcard hostname for sandbox origins (ADR-0013), with certificates via ACME.
@@ -25,4 +29,5 @@ The worker manages KVM, TAP devices, nftables and block devices, which needs hos
 ## Alternatives considered
 
 - **Everything in Compose:** one file, but forces a privileged worker container.
+- **Server as a GraalVM native image:** smaller and faster to start, but adds reflection configuration for DBOS and gRPC and a slower build, for no benefit to a long-running service.
 - **Kubernetes:** out of proportion for a single host; a Helm chart may follow when the hosted option exists.

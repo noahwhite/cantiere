@@ -23,6 +23,10 @@ Guest-served content is attacker-controllable, so it never shares an origin with
 - The proxy strips `Set-Cookie` for other hosts, `Service-Worker-Allowed`, and CORS headers from guest responses, and sets a strict CSP with `frame-ancestors` limited to the Cantiere UI origin.
 - The capability token grants editor and terminal access to that one session and nothing in the API.
 
+**Command palette.** Typing `/` in the message box opens a palette built from the runtime's latest `commands_available` event (ADR-0009), merged with Cantiere's own session actions (rewind to a checkpoint, start a child session, change policy).
+Runtime commands are sent as message text; Cantiere actions call the API.
+Each entry shows whether the runtime or Cantiere runs it.
+
 **Browser view.** Agent browsers run in an Xvfb display in the guest; x11vnc exposes it through the tunnel, and the UI embeds noVNC. Phase 1 is view-only, and interaction comes with take-over.
 
 **Take-over (UX-4).**
@@ -31,6 +35,14 @@ Guest-served content is attacker-controllable, so it never shares an origin with
 2. The session workflow (ADR-0006) interrupts the current turn and holds the input queue.
 3. Shell, editor and browser input are enabled for the human.
 4. On hand back, the adapter sends the runtime a message summarizing the human's changes (`git diff` and the commands run) and resumes.
+
+**Native-terminal take-over.** For anything the headless protocol cannot do, the human can take over into the runtime's own terminal UI:
+
+1. The workflow interrupts the turn and the adapter stops its headless process, so only one process writes the transcript.
+2. The guest opens a PTY running the runtime's interactive CLI on the same conversation (`claude --resume <session-id>` for Claude Code; for an ACP agent, the command its config declares, if any).
+3. On hand back, the adapter restarts headless from the transcript the human extended, and the session continues with what was said in the terminal.
+
+The terminal UI is a PTY like the human shell, so it is recorded the same way and needs no new transport.
 
 Every take-over and hand-back is a timeline event.
 
