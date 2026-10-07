@@ -238,7 +238,7 @@ Security is the main reason to move off the current containers, so these are all
 | ID | Requirement | Pri |
 | --- | --- | --- |
 | ID-1 | Secrets live in an external store behind a pluggable interface (OSS-3), resolved by reference at session start; OpenBao is the first implementation and the only one that mints dynamic credentials (ID-2); Bitwarden Secrets Manager is supported for static secrets; Vault or Infisical may follow (ADR-0010) | M |
-| ID-2 | Credentials are minted per session and short-lived: GitHub App installation tokens scoped to the session's repos, Linear and cloud tokens via broker; nothing long-lived enters the sandbox, and in practice only credentials with no injectable header enter it at all (ADR-0010) | M |
+| ID-2 | Credentials are minted per session and short-lived: GitHub App installation tokens scoped to the session's repos, Linear and cloud tokens via broker; nothing long-lived enters the sandbox, and in practice only credentials with no injectable header enter it at all (ADR-0010), apart from the subscription-mode token (COST-3) | M |
 | ID-3 | Personas declare required secrets; a session receives only those, never the union | M |
 | ID-4 | The platform never passes secrets in argv or writes them to files, logs or the timeline; session output (events, terminal recordings, artifacts) is scrubbed for every known secret value, placeholder and token pattern before it leaves the worker; encoded copies made by guest code are not caught, which is why credentials stay outside the sandbox (ADR-0010) | M |
 | ID-5 | Separate bot identities per role where the provider supports it (implementer vs reviewer vs QA), so a reviewer token cannot push | S |
