@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 560" width="760" height="560" font-family="FreeSans, Helvetica, Arial, sans-serif" font-size="13" role="img" aria-label="Platform architecture: control plane, brokers, worker sandboxes">
+<title>Officina Agent Platform architecture</title>
+<rect width="760" height="560" fill="#ffffff"/>
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#8a8f98"/></marker></defs>
+<text x="24" y="28" font-size="15" font-weight="bold" fill="#1f2328">Agents run in isolated sandboxes; credentials and egress are brokered outside them</text>
+<g fill="none" stroke="#8a8f98" stroke-width="1.25"><path d="M380 96V120" marker-end="url(#a)"/><path d="M136 232V256" marker-end="url(#a)"/><path d="M380 232V256" marker-end="url(#a)"/><path d="M624 232V256" marker-end="url(#a)"/><path d="M136 312V336" marker-end="url(#a)"/><path d="M380 312V336" marker-end="url(#a)"/><path d="M624 312V336" marker-end="url(#a)"/><path d="M380 464V488" marker-end="url(#a)"/></g>
+<rect x="24" y="48" width="712" height="48" rx="8" fill="none" fill-opacity="1" stroke="#8a8f98" stroke-width="1.25"/>
+<text x="380" y="68" text-anchor="middle" font-weight="bold" fill="#1f2328">Entry points</text>
+<text x="380" y="86" text-anchor="middle" font-size="11.5" fill="#59636e">Linear · GitHub /agent · Slack · Web UI · CLI · REST and MCP</text>
+<rect x="24" y="120" width="712" height="112" rx="8" fill="#f3f4f6" stroke="#8a8f98" stroke-width="1.25"/>
+<text x="40" y="142" font-weight="bold" fill="#1f2328">Control plane</text>
+<rect x="40" y="152" width="158" height="64" rx="8" fill="none" fill-opacity="1" stroke="#8a8f98" stroke-width="1.25"/>
+<text x="119" y="176" text-anchor="middle" font-weight="bold" fill="#1f2328">Scheduler</text>
+<text x="119" y="194" text-anchor="middle" font-size="11.5" fill="#59636e">places sandboxes</text>
+<rect x="214" y="152" width="158" height="64" rx="8" fill="none" fill-opacity="1" stroke="#8a8f98" stroke-width="1.25"/>
+<text x="293" y="176" text-anchor="middle" font-weight="bold" fill="#1f2328">Workflow engine</text>
+<text x="293" y="194" text-anchor="middle" font-size="11.5" fill="#59636e">agent() · human gates</text>
+<rect x="388" y="152" width="158" height="64" rx="8" fill="none" fill-opacity="1" stroke="#8a8f98" stroke-width="1.25"/>
+<text x="467" y="176" text-anchor="middle" font-weight="bold" fill="#1f2328">Timeline store</text>
+<text x="467" y="194" text-anchor="middle" font-size="11.5" fill="#59636e">events · replay</text>
+<rect x="562" y="152" width="158" height="64" rx="8" fill="none" fill-opacity="1" stroke="#8a8f98" stroke-width="1.25"/>
+<text x="641" y="176" text-anchor="middle" font-weight="bold" fill="#1f2328">Policy + audit</text>
+<text x="641" y="194" text-anchor="middle" font-size="11.5" fill="#59636e">approvals · append-only</text>
+<rect x="24" y="256" width="224" height="56" rx="8" fill="none" fill-opacity="1" stroke="#8a8f98" stroke-width="1.25"/>
+<text x="136" y="280" text-anchor="middle" font-weight="bold" fill="#1f2328">Secret broker</text>
+<text x="136" y="296" text-anchor="middle" font-size="11.5" fill="#59636e">BWS refs to short-lived tokens</text>
+<rect x="268" y="256" width="224" height="56" rx="8" fill="none" fill-opacity="1" stroke="#8a8f98" stroke-width="1.25"/>
+<text x="380" y="280" text-anchor="middle" font-weight="bold" fill="#1f2328">Egress proxy</text>
+<text x="380" y="296" text-anchor="middle" font-size="11.5" fill="#59636e">default-deny allowlist, logged</text>
+<rect x="512" y="256" width="224" height="56" rx="8" fill="none" fill-opacity="1" stroke="#8a8f98" stroke-width="1.25"/>
+<text x="624" y="280" text-anchor="middle" font-weight="bold" fill="#1f2328">Snapshot builder</text>
+<text x="624" y="296" text-anchor="middle" font-size="11.5" fill="#59636e">blueprint.yaml to images</text>
+<rect x="24" y="336" width="712" height="128" rx="8" fill="#f3f4f6" stroke="#8a8f98" stroke-width="1.25"/>
+<text x="40" y="358" font-weight="bold" fill="#1f2328">Worker host (one per Hetzner box)</text>
+<rect x="40" y="368" width="216" height="80" rx="8" fill="#d9622b" fill-opacity="0.12" stroke="#d9622b" stroke-width="2"/>
+<text x="148" y="392" text-anchor="middle" font-weight="bold" fill="#1f2328">Implementer sandbox</text>
+<text x="148" y="408" text-anchor="middle" font-size="11.5" fill="#1f2328">Claude Code · opencode · Codex</text>
+<text x="148" y="424" text-anchor="middle" font-size="11.5" fill="#1f2328">own worktree · Testcontainers</text>
+<rect x="272" y="368" width="216" height="80" rx="8" fill="none" fill-opacity="1" stroke="#8a8f98" stroke-width="1.25"/>
+<text x="380" y="392" text-anchor="middle" font-weight="bold" fill="#1f2328">Reviewer sandbox</text>
+<text x="380" y="408" text-anchor="middle" font-size="11.5" fill="#59636e">exact PR head, read-only</text>
+<text x="380" y="424" text-anchor="middle" font-size="11.5" fill="#59636e">no write credentials</text>
+<rect x="504" y="368" width="216" height="80" rx="8" fill="none" fill-opacity="1" stroke="#8a8f98" stroke-width="1.25"/>
+<text x="612" y="392" text-anchor="middle" font-weight="bold" fill="#1f2328">QA sandbox</text>
+<text x="612" y="408" text-anchor="middle" font-size="11.5" fill="#59636e">Playwright browser on dev</text>
+<text x="612" y="424" text-anchor="middle" font-size="11.5" fill="#59636e">Loki/Tempo read · Paddle sandbox</text>
+<text x="392" y="481" font-size="11.5" fill="#59636e">egress proxy only</text>
+<rect x="24" y="488" width="712" height="48" rx="8" fill="none" fill-opacity="1" stroke="#8a8f98" stroke-width="1.25"/>
+<text x="380" y="508" text-anchor="middle" font-weight="bold" fill="#1f2328">External services</text>
+<text x="380" y="526" text-anchor="middle" font-size="11.5" fill="#59636e">Model APIs · GitHub · Linear · dev hosts via Tailscale · OTLP · R2</text>
+</svg>
