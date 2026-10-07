@@ -23,7 +23,7 @@ build_secrets: [github-packages]            # names of org-granted bindings, nev
 initialize: ["./mvnw -q dependency:go-offline"]
 maintenance: ["./mvnw -q dependency:go-offline"]   # nightly refresh
 warm: ["docker pull postgres:17"]
-mcp_servers: [issue-tracker]              # names of org-granted servers, never commands
+mcp_servers: [issue-tracker]                # names of org-granted servers; definitions live in the org layer
 ```
 
 The schema is versioned and published (ADR-0017); unknown keys are errors.
