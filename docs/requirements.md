@@ -13,8 +13,8 @@ Today each agent runs in a long-lived Docker container per CLI (`claude-dev-cont
 | Pain | Evidence in the current setup |
 | --- | --- |
 | No per-task isolation | One `/workspace` bind mount shared by every session; 30+ hand-made `*-wt-off*` worktree folders accumulate in it |
-| Over-broad credentials | Every token (GitHub x2, Linear x2, Grafana x2, PagerDuty, BWS, Tailscale, Kimi, DeepSeek) is injected into every container as env vars, whatever the task |
-| Host escape surface | `/var/run/docker.sock` mounted, `NET_ADMIN`, `seccomp:unconfined` |
+| Over-broad credentials | Every long-lived credential is available to every session as env vars, whatever the task |
+| Host escape surface | Containers run with host-level privileges |
 | Shared-state contention | Concurrent `codex exec` runs fight over one `~/.codex` lock; memory and skills live in one shared volume |
 | Session history is siloed | Each CLI saves its own transcripts on the host (Claude Code in `~/.claude/projects`, resumable with `--resume`; Codex in `~/.codex/sessions`), but nothing links them to the ticket or PR, searches across CLIs, or shows them off that host |
 | Status tracking is manual | Agents hand-move Linear status and post review evidence; nothing aggregates what is running, blocked or waiting |
@@ -329,7 +329,7 @@ Later option: a hosted control plane (UI, workflows, integrations) with customer
 
 - [ ] Build on OpenHands' runtime and UI, or a thin new control plane over Coder/Firecracker? Decide in Phase 0.
 - [ ] Do Claude Code and Codex subscription terms allow headless use from a self-hosted multi-session server, or are API keys required? (COST-3)
-- [ ] Which host runs it: the existing CI/CD runner host, a new Hetzner box, or blackstar hardware at home?
+- [ ] Which host runs it?
 - [x] GitHub App vs fine-grained PATs for per-session tokens, given the `noahwhite` vs officina identity split. Resolved: per-deployment public GitHub App with optional user linking (GH-1..10).
 - [x] Project name and GitHub home (`noahwhite/*` vs a new org) for the open-source repo. Resolved: Cantiere, public at github.com/noahwhite/cantiere (personal account for showcase; transfer to an org later if needed).
 - [x] Self-hosted only, or also a hosted SaaS? Licensing allows both; a SaaS needs Anthropic's Commercial Terms, per-user model credentials (no reselling usage), customer isolation and one public app owned by the operator, as Devin does. Resolved: self-hosted now (see Deployment model).
