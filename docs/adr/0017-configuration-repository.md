@@ -26,7 +26,7 @@ Rules:
 - Changes that widen a persona's permissions are shown as a diff in the UI before they take effect. The same approval applies to repo-layer blueprint requests that add egress (ADR-0008), and both diffs list `pass` domains separately (ADR-0011).
 - Secret bindings (`{name, ref, hosts, repos}`) are defined only in `blueprints/org.yaml` and persona files, never in target repos (ADR-0008).
 - All config files have JSON Schemas published from this repo, and the server rejects invalid config with a precise error rather than starting with defaults.
-- Secrets are only ever references (`bws://<uuid>`, `vault://path#key`), never values.
+- Secrets are only ever references (`openbao://<mount>/<path>#<key>`, `bws://<uuid>`), never values.
 
 ## Consequences
 

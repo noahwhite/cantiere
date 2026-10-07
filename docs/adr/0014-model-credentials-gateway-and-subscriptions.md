@@ -26,7 +26,7 @@ The terms differ by vendor:
   runtime: acp
   agent: opencode
   model: moonshot/kimi-k3
-  secrets: [{provider: moonshot, ref: bws://<uuid>}]
+  secrets: [{provider: moonshot, ref: openbao://kv/models#moonshot}]
   github: {permissions: read, authoring: bot}
   budget: {session_usd: 5}
   ```

@@ -22,12 +22,15 @@ The default is that **no credential enters the sandbox**; the sandbox holds plac
 | GitHub, Linear and other HTTP API tokens | TLS-intercepting egress proxy swaps the placeholder header for the real token per host, and checks method and path against the persona | Placeholder |
 | Commit signing keys (SEC-7) | Commits are recreated and signed at push time by the git proxy (ADR-0012) | Nothing |
 | Tailscale (SEC-3) | Ephemeral node runs on the worker in the session's network namespace (ADR-0011) | Nothing |
-| Credentials with no injectable HTTP header (SSH to hosts, database passwords, S3 SigV4 for R2) | Minted per session, with a lifetime no longer than the session's maximum duration and revoked at session end; narrowest scope; declared by the persona. A credential type that cannot be bounded and revoked this way is not supported. | Yes, short-lived (ID-2) |
+| Credentials with no injectable HTTP header (SSH to hosts, database passwords, cloud credentials through an OpenBao plugin) | Minted per session by OpenBao, with a lifetime no longer than the session's maximum duration and revoked at session end; narrowest scope; declared by the persona. A credential type that cannot be bounded and revoked this way is not supported. | Yes, short-lived (ID-2) |
 | Claude or ChatGPT subscription logins (COST-3) | The user's own login, used only by the unmodified CLI (ADR-0014) | Yes, documented exception |
 
 Mechanics:
 
-- **Secret store (ID-1):** `SecretStore` interface with Bitwarden Secrets Manager first, then Vault and Infisical. The server resolves only the references the persona declares (ID-3), at session start and on refresh, and streams the values to the worker over the authenticated worker channel (ADR-0003). Values live in worker memory for the session and are never written to disk.
+- **Secret store (ID-1):** a `SecretStore` interface in the server. The server is the only component that talks to a store; it resolves only the references the persona declares (ID-3), at session start and on refresh, and streams the values to the worker over the authenticated worker channel (ADR-0003). Values live in worker memory for the session and are never written to disk.
+  - **OpenBao is the first implementation** (`openbao://<mount>/<path>#<key>`). It is the only store that can also mint credentials (below). The installer sets it up as its own service with its storage in the deployment's Postgres, in a separate database owned by a separate role (ADR-0005, ADR-0019), or points at an existing OpenBao. The server authenticates with AppRole and a policy limited to Cantiere's mounts.
+  - **Bitwarden Secrets Manager** (`bws://<uuid>`) is a read-only static-secret implementation for existing Bitwarden users. HashiCorp Vault and Infisical can follow behind the same interface.
+- **Dynamic credentials (ID-2):** credentials in the "Yes, short-lived" row are minted by OpenBao secrets engines, not by Cantiere code: the database engine (PostgreSQL, MySQL) for database roles, and SSH certificates for hosts. Cloud engines such as AWS are OpenBao external plugins an operator may install. Each lease's TTL is the session's maximum duration; the server revokes the session's leases at session end, and OpenBao revokes them on expiry if the server cannot. A credential type with no engine or plugin is not supported for direct use. With Bitwarden as the only store, no direct credentials are available.
 - **Minting (ID-2, GH-5):** the server mints GitHub installation tokens per session with `repository_ids` and `permissions` narrowed to the persona ([API](https://docs.github.com/en/rest/apps/apps#create-an-installation-access-token-for-an-app)), refreshes them before their 1-hour expiry, and revokes them at session end.
 - **GitHub API policy (inject mode on `api.github.com`):** method and path alone are not enough, because one write token can update any ref or merge any PR. The proxy therefore:
   - allows only an explicit route catalog per persona, with every route bound to the session's repos (owner and repo segments checked);
@@ -42,7 +45,16 @@ Mechanics:
 
 ## Consequences
 
+- OpenBao is a second service to run and upgrade, and its unseal key protects every stored secret (ADR-0019).
+
 - A compromised sandbox can act only through the proxies, within its persona's policy, and only while the session runs, except with direct credentials and over the tailnet, where it can do whatever that credential's scope or the tag's ACL allows until session end.
 - This exceeds ID-2; the requirement is met by construction and ID-2's "short-lived in sandbox" applies only to the non-HTTP row above.
 - The worker becomes the most sensitive component on a host; it runs outside every sandbox, and its proxies are covered by fuzz and policy tests.
-- Tools that pin certificates or ignore proxy and CA settings break; Phase 0 verifies the three CLIs, `git`, `gh`, Docker pulls and the Officina toolchains.
+- ID-1 lists Bitwarden, Infisical and Vault; OpenBao is an external store in the same sense (a separate service, reached by reference), and the requirements list is updated to name it.
+- S3 SigV4 credentials for Cloudflare R2 have no OpenBao engine, so sessions cannot use R2 directly until a plugin exists.
+- Tools that pin certificates or ignore proxy and CA settings break; Phase 0 and the first Phase 1 slice verify Claude Code, `git`, `gh`, Docker pulls and the Officina toolchains.
+
+## Alternatives considered
+
+- **Bitwarden Secrets Manager first:** already in use by the maintainers, but it stores static values only, so every short-lived credential type would need minting code in Cantiere.
+- **HashiCorp Vault:** the same engines, but under the Business Source License; OpenBao is its MPL-2.0 fork under the Linux Foundation.
