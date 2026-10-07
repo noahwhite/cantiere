@@ -32,7 +32,7 @@ Today each agent runs in a long-lived Docker container per CLI (`claude-dev-cont
 ### Success measures
 
 - Run 10 or more concurrent sessions on one host without cross-talk (today: about 3 to 4 terminals).
-- Zero long-lived credentials inside a sandbox: every secret short-lived and scoped to the session (subscription logins excepted until resolved, see COST-3).
+- Zero long-lived credentials inside a sandbox: every secret short-lived and scoped to the session (subscription mode excepted, see COST-3).
 - Every merged Officina PR traceable to a session record (plan, commands, review evidence).
 - Retire the three terminal containers for day-to-day Officina work.
 
@@ -145,7 +145,7 @@ Priorities use MoSCoW: M = must (Phase 1 or 2), S = should (Phase 2 to 4), C = c
 
 | ID | Requirement | Pri |
 | --- | --- | --- |
-| RT-1 | Pluggable runtime adapters run existing CLIs headless inside the sandbox: Claude Code, opencode, Codex CLI; adding a CLI is a config + adapter, not a fork | M |
+| RT-1 | Pluggable runtime adapters run existing CLIs headless inside the sandbox: Claude Code, opencode, Codex CLI; adding a CLI is a config + adapter, not a fork. Phase 1 ships Claude Code; opencode and Codex CLI follow in Phase 2 through an ACP adapter (ADR-0009) | M |
 | RT-2 | Adapters normalize a common event stream (messages, tool calls, file edits, commands, cost) into the session timeline | M |
 | RT-3 | Per-session model and effort choice, with org defaults and a deny list (e.g. never Fable 5) | M |
 | RT-4 | Skills, agents and memory mount read-only from a versioned source (the `claude-dev-container/skills` repo), synced per runtime's expected layout | M |
@@ -237,7 +237,7 @@ Security is the main reason to move off the current containers, so these are all
 
 | ID | Requirement | Pri |
 | --- | --- | --- |
-| ID-1 | Secrets live in an external store (Bitwarden Secrets Manager / Infisical / Vault); the platform resolves them by reference at session start | M |
+| ID-1 | Secrets live in an external store (OpenBao / Bitwarden Secrets Manager / Infisical / Vault); the platform resolves them by reference at session start | M |
 | ID-2 | Credentials are minted per session and short-lived: GitHub App installation tokens scoped to the session's repos, Linear and cloud tokens via broker; nothing long-lived enters the sandbox | M |
 | ID-3 | Personas declare required secrets; a session receives only those, never the union | M |
 | ID-4 | Secrets never appear in argv, files, logs or the timeline; output is scrubbed for known secret values and patterns before storage | M |
@@ -250,7 +250,7 @@ Security is the main reason to move off the current containers, so these are all
 | --- | --- | --- |
 | COST-1 | Live spend per session from runtime events (tokens x model price), aggregated per issue, persona and day; for subscription runtimes this is a notional API-equivalent figure, and the provider's usage-limit windows are tracked separately | M |
 | COST-2 | Hard budget caps per session and per day; at the cap the session pauses and posts to the inbox | M |
-| COST-3 | Support subscription-auth runtimes (Claude Code OAuth, Codex login) alongside API keys, with per-session isolated auth homes; these logins keep a refresh credential in that home, an exception to ID-2 until Phase 0 shows the broker can hold it and pass only access tokens to the sandbox | M |
+| COST-3 | Support subscription-auth runtimes (Claude Code OAuth, Codex login) alongside API keys, with per-session isolated auth homes; subscription mode is opt-in and limited to single-subscriber deployments; it places the subscriber's own token in that subscriber's sessions, a permanent exception to ID-2 (ADR-0014) | M |
 | COST-4 | One 16-core / 64 GB host runs 10 concurrent sessions at Officina workload; sandboxes have CPU, memory and disk quotas | M |
 | COST-5 | Add worker hosts by registration; the scheduler places sessions by free capacity | S |
 
@@ -291,7 +291,7 @@ The implementer sandbox is the only one with push rights, and only to its own br
 | Agent runtimes | Claude Code, opencode, Codex CLI headless modes | Runtime adapters + event normalizer (RT-1, RT-2) |
 | Workflow engine | Temporal or a durable-execution library | Officina reference workflow + gate steps |
 | Web UI | OpenHands UI, code-server, xterm.js, noVNC for browser view | Session list, inbox, timeline |
-| Secrets | Bitwarden Secrets Manager (in use), GitHub App tokens | Per-session broker (ID-2, ID-3) |
+| Secrets | OpenBao, Bitwarden Secrets Manager (in use), GitHub App tokens | Per-session broker (ID-2, ID-3) |
 | Egress | Squid / Envoy / smokescreen | Allowlist config from blueprints |
 | Observability | OpenTelemetry, Grafana Cloud, R2 | Event schema and dashboards |
 
@@ -319,16 +319,16 @@ Later option: a hosted control plane (UI, workflows, integrations) with customer
 
 ### Phased roadmap (one epic per phase)
 
-1. **Phase 0 - Spike (timebox 1 week):** compare OpenHands runtime, Coder, E2B/microsandbox and plain Firecracker for SB-1, SEC-1, SEC-2; test broker-held subscription credentials (COST-3); run one Claude Code session headless end to end. Exit: sandbox backend chosen, ADR merged.
-2. **Phase 1 - Single-session MVP:** SB-1..6, RT-1..4, RT-6, IN-3, IN-4, GH-1..3, GH-5..8, UX-1..5, SEC-1..5, SEC-7, ID-1..4, KN-1, COST-1..4, OBS-1..3, OSS-1..4, OSS-6. Exit: one Officina story implemented through PR from the web UI with no terminal container.
-3. **Phase 2 - Ticket-driven and orchestrated:** IN-1, IN-2, GH-4, IN-5, UX-6..8, WF-1..7, SEC-6. Exit: assigning an OFF story runs the full reference workflow to a merge-approval request; reviewers run read-only.
+1. **Phase 0 - Spike (timebox 1 week):** compare OpenHands runtime, Coder, E2B/microsandbox and plain Firecracker for SB-1, SEC-1, SEC-2; test broker-held subscription credentials (COST-3, answered in ADR-0014); run one Claude Code session headless end to end. Exit: sandbox backend chosen, ADR merged.
+2. **Phase 1 - Single-session MVP:** SB-1..6, RT-1 (Claude Code), RT-2..4, RT-6, IN-3, IN-4, GH-1..3, GH-5..8, UX-1..5, SEC-1..5, SEC-7, ID-1..4, KN-1, COST-1..4, OBS-1..3, OSS-1..4, OSS-6. Exit: one Officina story implemented through PR from the web UI with no terminal container.
+3. **Phase 2 - Ticket-driven and orchestrated:** IN-1, IN-2, GH-4, IN-5, RT-1 (opencode, Codex CLI), UX-6..8, WF-1..7, SEC-6. Exit: assigning an OFF story runs the full reference workflow to a merge-approval request; reviewers run read-only.
 4. **Phase 3 - Always-on:** IN-6..8, SB-7, RT-5, KN-2, KN-4, ID-5, GH-9, COST-5, OBS-4. Exit: terminal containers retired; QA and PagerDuty sessions start without a human.
 5. **Phase 4 - Community:** OSS-5, KN-3, SB-8, ID-6, GH-10, GitHub Issues and Jira providers, first external release.
 
 ### Open questions
 
 - [ ] Build on OpenHands' runtime and UI, or a thin new control plane over Coder/Firecracker? Decide in Phase 0.
-- [ ] Do Claude Code and Codex subscription terms allow headless use from a self-hosted multi-session server, or are API keys required? (COST-3)
+- [ ] Do Claude Code and Codex subscription terms allow headless use from a self-hosted multi-session server, or are API keys required? (COST-3) Answered in ADR-0014: API keys by default; subscription mode only for single-subscriber deployments, with storing the Claude setup-token an accepted residual risk awaiting owner sign-off.
 - [ ] Which host runs it?
 - [x] GitHub App vs fine-grained PATs for per-session tokens, given the `noahwhite` vs officina identity split. Resolved: per-deployment public GitHub App with optional user linking (GH-1..10).
 - [x] Project name and GitHub home (`noahwhite/*` vs a new org) for the open-source repo. Resolved: Cantiere, public at github.com/noahwhite/cantiere (personal account for showcase; transfer to an org later if needed).
