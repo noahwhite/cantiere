@@ -176,7 +176,7 @@ Each item's pass condition is written in its ADR.
 | 10 | Phase 1, slice 1 | GitHub API policy | Session token cannot update refs, merge, or mutate other repos via REST or GraphQL | 0010 |
 | 11 | Phase 1, slice 1 | Push-time signing | Recreated bot and user commits show Verified and keep trees | 0012 |
 | 12 | Phase 1, slice 1 | Durable step atomicity | A DBOS step that writes a row through the jOOQ step factory and is killed before returning leaves both the row and the checkpoint, or neither | 0006 |
-| 13 | Phase 1, slice 1 | OpenBao dynamic credentials | A database role and an SSH certificate are issued with a TTL equal to the session maximum and stop working when the session ends, both by server revocation and by expiry with the server stopped | 0010 |
+| 13 | Phase 1, slice 1 | OpenBao dynamic credentials | A database role issued with a TTL equal to the session maximum stops working, and its open connections are closed, at session end by server revocation and at expiry with the server stopped; SSH through the worker agent works during the session and fails after it ends, even with the certificate copied out of the guest | 0010 |
 
 The original Phase 0 item "test broker-held subscription credentials" is answered by research instead of a test: Cantiere stores the subscriber's own `setup-token` and places it in their sessions' guest environment, without proxying it, as a residual terms risk that needs owner sign-off (ADR-0014).
 
