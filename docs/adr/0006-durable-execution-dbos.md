@@ -30,7 +30,7 @@ DBOS ships a Spring Boot starter and no Quarkus integration, so it is used as a 
 - Stall and loop detection (WF-7) and budget stops (COST-2) are timers and messages on the session workflow.
 - DBOS keeps its own system tables without a `tenant_id` column; every workflow input and workflow ID carries the tenant, which is the one documented exception to ADR-0005's tenancy rule.
 - The engine is used only behind a small internal `durable` module so it can be replaced without touching session logic.
-- Steps that write Cantiere's own tables run through DBOS's jOOQ step factory (`PostgresStepFactory`), which commits the step's writes and its checkpoint in one transaction, rather than inside a Quarkus `@Transactional` boundary. DBOS's annotation-based transactional steps exist only for Spring, so they are not used. A Phase 1 slice 1 test proves this: a step that writes a row and is killed before returning leaves either both the row and the checkpoint or neither.
+- Steps that write Cantiere's own tables run through DBOS's jOOQ step factory (`JooqStepFactory`), which commits the step's writes and its checkpoint in one transaction, rather than inside a Quarkus `@Transactional` boundary. DBOS's annotation-based transactional steps exist only for Spring, so they are not used. A Phase 1 slice 1 test proves this: a step that writes a row and is killed before returning leaves either both the row and the checkpoint or neither.
 
 ## Consequences
 

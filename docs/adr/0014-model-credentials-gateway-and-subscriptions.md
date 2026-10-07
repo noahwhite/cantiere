@@ -35,7 +35,7 @@ The terms differ by vendor:
   - injects the real key (Anthropic, OpenAI, Bedrock, Vertex, or any OpenAI-compatible endpoint such as DeepSeek, Moonshot, OpenRouter or a local vLLM);
   - rejects requests for denied models (RT-3);
   - reads token usage from responses and prices it from a per-model price table (input, output, cache read and cache write per million tokens) kept in the config repo (ADR-0017), producing authoritative `cost` events (COST-1); a model with no price entry is refused, so API-key spend is never unmetered;
-  - refuses new requests once the session or daily budget is spent, which pauses the session to the inbox (COST-2).
+  - enforces budgets with reservations (COST-2): the server grants each session a budget lease from an atomic per-tenant daily counter in Postgres; before forwarding a request the gateway reserves its worst-case cost (input tokens plus `max_tokens` output, at table prices) from the lease, refuses the request if the reservation does not fit, and releases the unused part when the response's usage is known. When the lease and the daily counter are spent the session pauses to the inbox. Spend can therefore never exceed the cap, except by provider-side usage the response does not report, which is reconciled on the next request.
 - Keys belong to the deployment or to individual users; per-user keys are used only for that user's sessions.
 
 **Subscription mode (opt-in, single-subscriber deployments only, COST-3).**
@@ -45,12 +45,13 @@ The terms differ by vendor:
 - Cantiere never routes subscription traffic through the gateway, never intercepts it (`pass` mode in ADR-0011), and never uses it with the Agent SDK.
 - ChatGPT: the user's sign-in follows OpenAI's self-hosted flow, and the token is passed to the ACP agent in that subscriber's sessions (`codex-acp`, which runs the Codex `app-server`, or opencode).
 - Spend for subscription sessions is a notional API-equivalent figure from runtime-reported usage (Claude Code `result` events, ACP `usage_update`), priced from the same table and marked as runtime-reported (ADR-0009). Provider usage windows are tracked separately, and budgets apply to the notional figure.
-- This answers the Phase 0 question: the broker will **not** hold or inject Claude subscription credentials, because that would intermediate them. COST-3's exception to ID-2 is permanent for subscription mode, and the docs say so.
+- This answers the Phase 0 question about broker-held subscription credentials: Cantiere stores the subscriber's own `setup-token` in the secret store and places it in the guest environment of that subscriber's sessions; it never proxies, refreshes or shares it. Whether this counts as intermediating under Anthropic's terms is an accepted residual risk that needs the project owner's sign-off before subscription mode ships. The alternative with no stored token is a per-session `/login` through native-terminal take-over (ADR-0013). COST-3's exception to ID-2 is permanent for subscription mode, and the docs say so.
 - Subscription mode is disabled by default; the operator enables it after reading the vendor terms, linked from the setting.
 - The model deny list (RT-3) cannot be enforced outside the sandbox in subscription mode, because that traffic is not intercepted; only the adapter enforces it.
 
 ## Consequences
 
-- API-key sessions get hard budget enforcement outside the sandbox; subscription sessions get best-effort enforcement only (the adapter interrupts at the cap, the gateway cannot).
+- API-key sessions get hard budget enforcement outside the sandbox, at the cost of rejecting a request near the cap whose worst case does not fit even if its real cost would; subscription sessions get best-effort enforcement only (the adapter interrupts at the cap, the gateway cannot).
 - A subscription token in a compromised sandbox is exposed for its lifetime (up to a year for `setup-token`). Mitigations are egress allowlisting (ADR-0011), the git proxy's secret scan (ADR-0010), and the single-subscriber restriction. The scrubber catches only literal and known-pattern copies, not encoded ones.
+- `pass` domains, including subscription endpoints, are opaque to the proxy, so guest code can send data there with credentials of its own (ADR-0011). Each `pass` entry is an operator-accepted exfiltration channel and is listed in the approval diff.
 - Concurrency limits for subscription use are not defined by the vendors; Cantiere exposes a per-user concurrent-session cap for subscription mode.

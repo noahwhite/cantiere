@@ -22,7 +22,7 @@ Credential injection (ADR-0010) and model metering (ADR-0014) need the same chok
 
 **Egress proxy** (Rust, part of `cantiere-worker`, transparent):
 
-- Reads SNI (TLS) or `Host` (HTTP) and matches it against the session's allowlist: the union of the org and repo blueprint `egress` lists and the persona's list.
+- Reads SNI (TLS) or `Host` (HTTP) and matches it against the session's allowlist: the org blueprint layer's `egress` list, the persona's list, and the repo-layer entries an operator has approved for that repo (ADR-0008).
 - Each allowed domain has one mode:
   - `pass`: splice TLS through untouched.
   - `inspect`: terminate TLS with the per-session CA and apply method and path rules.
@@ -30,10 +30,11 @@ Credential injection (ADR-0010) and model metering (ADR-0014) need the same chok
 - Denials and policy rejections become timeline events with `trust` context and audit entries.
 - The proxy resolves the allowed name itself through the worker resolver and dials that address; the destination IP the guest used is ignored, so an allowlisted SNI cannot be pointed at an arbitrary host.
 - On `inspect` and `inject` domains the proxy strips credentials the guest supplies itself (`Authorization`, `Proxy-Authorization`, cookies, basic auth in URLs), so code cannot push or publish to an attacker's account through an allowed host.
-- `pass` mode is opaque, so any `pass` domain that accepts uploads is an exfiltration path; domains with write APIs (`github.com`, package registries) are `inspect` or `inject` by default, and `pass` is reserved for read-only endpoints.
+- `pass` mode is opaque: the proxy sees neither method, path nor body and strips no guest-supplied credentials, so it cannot enforce that a `pass` domain is used read-only. Guest code can send data to any `pass` domain, including with an API key of its own. Every `pass` domain is therefore an operator-accepted exfiltration channel: domains with write APIs (`github.com`, package registries) are `inspect` or `inject` by default, and `pass` entries are listed separately in the persona and blueprint approval diffs (ADR-0017).
 - Envoy's SNI forward proxy is still alpha, and smokescreen needs explicit proxy settings, so the proxy is written in Rust on `hyper` and `rustls` rather than adopted (ADR-0004).
 
 **Tailnet (SEC-3).** For personas that declare `tailnet: {tags: [...]}`, the worker starts a kernel-mode `tailscaled` inside the session's network namespace. It owns that namespace's TUN device, keeps its state in memory (`--state=mem:`), and joins with a single-use, pre-tagged ephemeral auth key minted through a Tailscale OAuth client. nftables routes the guest's tailnet traffic from the TAP to the TUN. Userspace networking mode is not used, because it creates no TUN device and only offers SOCKS5 and HTTP proxies. The node is removed at session end. The guest reaches only what the tag's ACL allows, and the auth key never enters the guest.
+Tailnet traffic does not pass through the proxy or the policy engine, so the tailnet ACL is the only control on it. The config repo marks each Tailscale tag `read` or `write` according to what its ACL allows, and persona validation rejects any reviewer or QA persona that declares a `write` tag (SEC-4, ADR-0015).
 
 `tailscaled` is the upstream Go client run as a separate process; the Rust worker launches and supervises it and links no Tailscale code.
 [`tailscale-rs`](https://github.com/tailscale/tailscale-rs) was considered and rejected for now: it is an experimental preview with no compatibility guarantees, offers only in-process TCP and UDP sockets (no TUN device for arbitrary guest traffic), and lacks MagicDNS.

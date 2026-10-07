@@ -1,4 +1,4 @@
-# ADR-0005: Postgres is the only stateful dependency; blobs go to S3-compatible storage
+# ADR-0005: Postgres is the only database; blobs go to S3-compatible storage
 
 - Status: Accepted
 - Date: 2026-10-07
@@ -20,7 +20,7 @@ Every extra stateful service (message broker, workflow server, search engine) is
 
 ## Consequences
 
-- Backup and restore is one `pg_dump` plus the bucket.
+- Backup and restore is one `pg_dump` plus the bucket; on a self-hosted install with MinIO, that bucket is the MinIO volume, which is a second durable store to back up.
 - Event volume is bounded by partitioning and offloading large payloads; if a deployment outgrows it, the timeline store is behind an interface and can move.
 - Full-text search across sessions (KN-2, Phase 3) starts with Postgres full-text search and can add a dedicated index later.
 

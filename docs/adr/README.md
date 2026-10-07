@@ -9,7 +9,7 @@ The architecture these decisions add up to is in [architecture.md](../architectu
 | [0002](0002-thin-control-plane-reuse-components.md) | Thin control plane, reuse components, no platform fork | Accepted |
 | [0003](0003-control-plane-worker-guest-topology.md) | Control plane, worker, guest agent; workers dial out | Accepted |
 | [0004](0004-languages-java-server-rust-worker.md) | Java and Quarkus server, Rust worker and guest, TypeScript and React UI, protobuf contracts | Accepted |
-| [0005](0005-postgres-and-object-store.md) | Postgres only stateful dependency, S3-compatible blobs, `tenant_id` everywhere | Accepted |
+| [0005](0005-postgres-and-object-store.md) | Postgres the only database, S3-compatible blobs, `tenant_id` everywhere | Accepted |
 | [0006](0006-durable-execution-dbos.md) | Sessions and workflows on DBOS Transact Java | Accepted |
 | [0007](0007-sandbox-backend-firecracker.md) | Firecracker microVMs on bare-metal workers | Proposed - Phase 0 validation |
 | [0008](0008-blueprints-and-snapshots.md) | Blueprints to OCI images to warmed snapshot templates | Accepted |

@@ -22,7 +22,7 @@ The default is that **no credential enters the sandbox**; the sandbox holds plac
 | GitHub, Linear and other HTTP API tokens | TLS-intercepting egress proxy swaps the placeholder header for the real token per host, and checks method and path against the persona | Placeholder |
 | Commit signing keys (SEC-7) | Commits are recreated and signed at push time by the git proxy (ADR-0012) | Nothing |
 | Tailscale (SEC-3) | Ephemeral node runs on the worker in the session's network namespace (ADR-0011) | Nothing |
-| Credentials with no injectable HTTP header (SSH to hosts, database passwords, S3 SigV4 for R2) | Minted per session, shortest TTL the provider allows, narrowest scope, declared by the persona | Yes, short-lived (ID-2) |
+| Credentials with no injectable HTTP header (SSH to hosts, database passwords, S3 SigV4 for R2) | Minted per session, with a lifetime no longer than the session's maximum duration and revoked at session end; narrowest scope; declared by the persona. A credential type that cannot be bounded and revoked this way is not supported. | Yes, short-lived (ID-2) |
 | Claude or ChatGPT subscription logins (COST-3) | The user's own login, used only by the unmodified CLI (ADR-0014) | Yes, documented exception |
 
 Mechanics:
@@ -37,11 +37,12 @@ Mechanics:
   The installer also recommends a repository ruleset on each target repo's default branch (PR and review required, the app not in the bypass list), so the platform invariant holds even if the proxy is wrong.
 - **Git proxy:** allows fetch of the session's repos, and push only to the session's branch (SB-5); rejects force-push to anything but that branch, rejects pushes containing any known secret value of the session, and records every push in the audit log (SEC-5). Reviewer and QA sessions get fetch only (SEC-4).
 - **Per-session CA:** the worker creates an ephemeral CA per session; only its certificate enters the guest trust store (`NODE_EXTRA_CA_CERTS`, `CODEX_CA_CERTIFICATE`, `SSL_CERT_FILE` and the system store); its private key never leaves the worker. Processes warmed in the snapshot (for example `dockerd`, whose Go runtime caches the system pool) do not see a CA added after restore, so the guest agent installs the CA and then restarts those daemons before the session starts; Phase 0 measures the cost.
+- **Direct credentials and SEC-4:** the rows marked "Yes" above do not pass through the proxies or `policy.Decide`, so for them SEC-4 is enforced by scope alone. Each direct credential type declares its access level (`read` or `write`) in the config repo, and persona validation rejects any reviewer or QA persona that requests a `write` credential (ADR-0015).
 - **Scrubbing (ID-4):** the worker knows every secret value and placeholder of the session and scrubs them, plus known token patterns, from events, terminal recordings and artifacts before they leave the worker. Secrets are never passed in argv or written to files by Cantiere.
 
 ## Consequences
 
-- A compromised sandbox can act only through the proxies, within its persona's policy, and only while the session runs.
+- A compromised sandbox can act only through the proxies, within its persona's policy, and only while the session runs, except with direct credentials and over the tailnet, where it can do whatever that credential's scope or the tag's ACL allows until session end.
 - This exceeds ID-2; the requirement is met by construction and ID-2's "short-lived in sandbox" applies only to the non-HTTP row above.
 - The worker becomes the most sensitive component on a host; it runs outside every sandbox, and its proxies are covered by fuzz and policy tests.
 - Tools that pin certificates or ignore proxy and CA settings break; Phase 0 verifies the three CLIs, `git`, `gh`, Docker pulls and the Officina toolchains.

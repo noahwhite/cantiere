@@ -15,10 +15,10 @@ That gives one enforcement point; it needs one place where the rules live and on
 - **Rules as data:** persona definitions in the config repo (ADR-0017) declare allowed actions, repos, branches, GitHub permissions, egress domains and budget; the engine evaluates those declarations plus fixed platform invariants. Phase 1 implements rules in Java in the server over the persona schema; workers only cache decisions and never evaluate rules, so no second implementation exists. A general policy language (Cedar or OPA) is deferred until a second rule author exists.
 - **Fixed invariants** that no persona can override:
   - push only to the session's own branch (SB-5);
-  - reviewer and QA personas get no write action on git or production systems (SEC-4);
+  - reviewer and QA personas get no write action on git or production systems (SEC-4): through the proxies by decision, and for direct credentials and tailnet tags by persona validation that rejects `write` scopes (ADR-0010, ADR-0011);
   - merge requires a recorded review on the current head plus a human approval (WF-4);
   - actions whose arguments came from untrusted content are marked and cannot satisfy a high-impact rule on their own (SEC-6, enforced from Phase 2).
-- **Audit log:** an `audit_events` table, insert-only for the application role (no `UPDATE` or `DELETE` grants), each row carrying session, persona, actor (bot or linked user), action, target, head SHA, decision, and the SHA-256 of the previous row, so tampering is detectable. A daily digest of the chain head is written to the object store.
+- **Audit log:** an `audit_events` table, insert-only for the application role (no `UPDATE` or `DELETE` grants), each row carrying session, persona, actor (bot or linked user), action, target, head SHA, decision, and the SHA-256 of the previous row, so tampering is detectable. Appends are serialized per tenant: the writer locks the tenant's chain-head row (`SELECT ... FOR UPDATE`) in the same transaction as the insert, and each row has a monotonic `chain_seq` with `UNIQUE (tenant_id, chain_seq)` and `UNIQUE (tenant_id, prev_hash)`, so concurrent actions cannot fork the chain. A daily digest of the chain head is written to the object store.
 
 ## Consequences
 

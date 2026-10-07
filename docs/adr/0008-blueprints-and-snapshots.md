@@ -18,15 +18,20 @@ version: 1
 base: ghcr.io/cantiere/base:ubuntu-24.04   # or a Dockerfile path
 toolchains: {java: "25", node: "24"}
 services: [docker]                          # dockerd in the guest
-egress: [repo.maven.apache.org, registry.npmjs.org]
-build_secrets:                              # applied by the worker proxy, never in the VM
-  - {host: maven.pkg.github.com, ref: bws://<uuid>}
+egress: [repo.maven.apache.org, registry.npmjs.org]   # a request; see trust rules below
+build_secrets: [github-packages]            # names of org-granted bindings, never refs
 initialize: ["./mvnw -q dependency:go-offline"]
 maintenance: ["./mvnw -q dependency:go-offline"]   # nightly refresh
 warm: ["docker pull postgres:17"]
 ```
 
 The schema is versioned and published (ADR-0017); unknown keys are errors.
+
+**Trust split between layers.** A target repo is less trusted than the config repo, because anyone who can merge to it controls its blueprint.
+
+- Only the org layer in the config repo defines secret bindings, each as `{name, ref, hosts, repos}`: which secret is injected, for which hosts, and for which repos. A repo layer can only name a binding granted to that repo; it can never contain a secret reference or choose the host a secret is sent to.
+- A repo layer's `egress` entries outside the org layer's list are requests. Each new repo-domain pair takes effect only after an operator approves it in the UI, shown as a diff like persona widening (ADR-0017), and the approval is audited (ADR-0015).
+- A pending request does not block the build; the domain stays denied, and the denial is logged with the pending request.
 
 **Build pipeline** (in `cantiere-worker`):
 

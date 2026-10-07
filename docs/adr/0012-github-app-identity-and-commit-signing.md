@@ -36,11 +36,11 @@ The guest performs pushes through its own `git push` wrapper, which holds the re
 ## Validation checks
 
 1. Recreated bot commits show Verified, keep the original tree (file modes, symlinks), and the guest branch update leaves a clean working tree.
-2. The app can register a user SSH signing key with a user token, and commits created with a worker-computed `signature` show Verified as the user.
+2. The app can register a user SSH signing key with a user token, and commits created with a worker-computed `signature` show Verified as the user. GitHub [documents the `signature` field](https://docs.github.com/en/rest/git/commits#create-a-commit) as an ASCII-armored PGP signature, so an SSH signature through this API is unverified until this check passes.
 3. Pushes to `cantiere-staging/*` are allowed by the target repo's rulesets, and staging branches do not trigger CI (the reference workflow ignores the prefix).
 
-If check 1 fails, `bot` mode falls back to plain pushes of unsigned bot commits, with a repository ruleset that does not require signatures for the app.
-If check 2 fails, `user` mode falls back to bot commits with the user as co-author, as GH-8 already allows.
+If check 1 fails, `bot` mode falls back to plain pushes of unsigned bot commits, with a repository ruleset that does not require signatures for the app. That is a deviation from SEC-7: it needs the project owner's approval, is off until a deployment operator enables it, and every unsigned push is written to the audit log (ADR-0015).
+If check 2 fails, the worker builds the user-signed commit itself (with `gix` and `ssh-key`) and pushes it over git with the user's token, which needs no `signature` field. If that also fails to show Verified, `user` mode falls back to bot commits with the user as co-author, as GH-8 already allows.
 
 ## Consequences
 

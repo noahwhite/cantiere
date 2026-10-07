@@ -9,7 +9,7 @@ Each decision below links to its ADR in [docs/adr](adr/README.md).
 1. **The sandbox holds nothing worth stealing.** Credentials are applied at the worker boundary on the way out (ADR-0010); the only documented exception is a user's own subscription login (ADR-0014).
 2. **Controls are construction, not prompts.** Permissions live in the VM boundary, the egress proxy, the git proxy and one policy engine (ADR-0007, ADR-0011, ADR-0015).
 3. **Host existing CLIs unmodified.** Cantiere owns sessions, isolation, credentials and workflows, not the agent loop (ADR-0002, ADR-0009).
-4. **One stateful dependency.** Postgres for state and workflows, an object store for blobs (ADR-0005, ADR-0006).
+4. **One database.** Postgres for state and workflows, an object store for blobs (ADR-0005, ADR-0006).
 5. **Single host first, hosted control plane possible.** Workers dial out and every record carries a tenant ID (ADR-0003, OSS-6).
 
 ## Components
@@ -137,7 +137,7 @@ Untrusted content (issue text, PR comments, web pages, tool output) is tagged on
 | --- | --- |
 | SB-1, SB-6, SEC-1 | 0007 |
 | SB-2, SB-3, SB-4, SB-5, RT-4 | 0008 |
-| RT-1, RT-2, RT-3, RT-6, KN-1 | 0009, 0008 |
+| RT-1 (partial: Claude Code only; opencode and Codex in Phase 2), RT-2, RT-3, RT-6, KN-1 | 0009, 0008 |
 | IN-3, IN-4 | 0016 and the public API above |
 | GH-1, GH-2, GH-3, GH-5, GH-6, GH-7, GH-8 | 0012, 0010 |
 | UX-1, UX-2, UX-3, UX-4, UX-5 | 0013, 0009, 0005 |
@@ -167,17 +167,17 @@ Each item's pass condition is written in its ADR.
 | 1 | Phase 0 | Restore time | < 2 s p50, < 30 s p99 to guest-ready | 0007 |
 | 2 | Phase 0 | Officina suites in a guest | `officina` and `officina-site` tests incl. Testcontainers and Playwright pass | 0007 |
 | 3 | Phase 0 | Density | 10 concurrent sessions on 16 cores / 64 GB without OOM | 0007 |
-| 4 | Phase 0 | Escape and egress | Root in guest cannot reach host, peers, metadata or non-allowlisted hosts (nftables only); all attempts logged | 0007, 0011 |
+| 4 | Phase 0 | Escape and isolation | With nftables only, root in guest cannot reach the host, peers or metadata; only DNS and ports 80 and 443 to the worker leave the namespace; all drops logged | 0007, 0011 |
 | 5 | Phase 0 | Clone identity | Unique entropy, machine ID and network identity per restored clone | 0007 |
 | 6 | Phase 0 | Firecracker client | `fctools` drives create, snapshot, restore, balloon and jailer launch for items 1 to 5; otherwise a client generated from `firecracker.yaml` | 0004, 0007 |
-| 7 | Phase 0 | Headless Claude Code end to end | One Claude Code session takes a prompt to a pushed branch with events streaming, and a user skill dispatched as `/name` runs | 0009 |
-| 8 | Phase 1, slice 1 | CA and proxy trust | Claude Code, `git`, `gh`, Docker pulls, Maven and npm work through the proxy with the per-session CA | 0010, 0011 |
+| 7 | Phase 0 | Headless Claude Code end to end | One Claude Code session takes a prompt to a pushed branch with events streaming, and a user skill dispatched as `/name` runs. The push goes to a throwaway repo with a temporary spike-only credential; it does not validate ADR-0010, which items 8, 10 and 11 do | 0009 |
+| 8 | Phase 1, slice 1 | CA, proxy trust and domain allowlist | Claude Code, `git`, `gh`, Docker pulls, Maven and npm work through the proxy with the per-session CA; non-allowlisted domains are denied and every denial is logged | 0010, 0011 |
 | 9 | Phase 1, slice 1 | Model gateway | Claude Code runs end to end against the gateway with a placeholder key; usage metered and priced from the config-repo price table | 0014 |
 | 10 | Phase 1, slice 1 | GitHub API policy | Session token cannot update refs, merge, or mutate other repos via REST or GraphQL | 0010 |
 | 11 | Phase 1, slice 1 | Push-time signing | Recreated bot and user commits show Verified and keep trees | 0012 |
 | 12 | Phase 1, slice 1 | Durable step atomicity | A DBOS step that writes a row through the jOOQ step factory and is killed before returning leaves both the row and the checkpoint, or neither | 0006 |
 
-The original Phase 0 item "test broker-held subscription credentials" is answered by research instead of a test: Anthropic's terms forbid intermediating subscription credentials, so the broker will not hold or inject them (ADR-0014).
+The original Phase 0 item "test broker-held subscription credentials" is answered by research instead of a test: Cantiere stores the subscriber's own `setup-token` and places it in their sessions' guest environment, without proxying it, as a residual terms risk that needs owner sign-off (ADR-0014).
 
 ## Open questions after these ADRs
 

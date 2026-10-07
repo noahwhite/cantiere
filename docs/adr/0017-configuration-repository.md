@@ -23,7 +23,8 @@ Cantiere reads configuration from Git, at a pinned commit, in two places:
 Rules:
 
 - The server tracks the config repo's default branch and records the commit each session ran with; a session never sees config changes mid-run.
-- Changes that widen a persona's permissions are shown as a diff in the UI before they take effect.
+- Changes that widen a persona's permissions are shown as a diff in the UI before they take effect. The same approval applies to repo-layer blueprint requests that add egress (ADR-0008), and both diffs list `pass` domains separately (ADR-0011).
+- Secret bindings (`{name, ref, hosts, repos}`) are defined only in `blueprints/org.yaml` and persona files, never in target repos (ADR-0008).
 - All config files have JSON Schemas published from this repo, and the server rejects invalid config with a precise error rather than starting with defaults.
 - Secrets are only ever references (`bws://<uuid>`, `vault://path#key`), never values.
 

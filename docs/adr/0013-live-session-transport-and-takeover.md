@@ -18,7 +18,7 @@ ADR-0003 forbids any route from the sandbox to the server.
 **Editor.** code-server runs in the guest bound to localhost and is reached through the tunnel; there is no direct network path.
 Guest-served content is attacker-controllable, so it never shares an origin with the Cantiere UI or API:
 
-- It is served from a separate per-session origin (`<session-id>.sandbox.<deployment-domain>`, a separate registrable domain where possible) that holds no Cantiere cookies.
+- It is served from a separate per-session origin (`<session-id>.sandbox.<deployment-domain>`) that holds no Cantiere cookies. A separate registrable domain is recommended. When the sandbox origin shares the UI's site, the UI's `Origin` and CSRF checks (ADR-0016) are what stop guest pages from acting as the user, and they are always on.
 - Access uses a short-lived, single-session capability token that the UI mints and passes once; the sandbox origin sets its own cookie scoped to that host only.
 - The proxy strips `Set-Cookie` for other hosts, `Service-Worker-Allowed`, and CORS headers from guest responses, and sets a strict CSP with `frame-ancestors` limited to the Cantiere UI origin.
 - The capability token grants editor and terminal access to that one session and nothing in the API.
@@ -52,4 +52,4 @@ Every take-over and hand-back is a timeline event.
 
 - Live traffic adds two hops (vsock, then the worker channel); terminal latency is acceptable at this scale and is measured in Phase 0.
 - Because there is no inbound path to sandboxes, sharing a live view means sharing a Cantiere session view, never a sandbox URL.
-- Deployments need a wildcard DNS record and certificate for the sandbox origin; the installer sets both up (ADR-0019).
+- Deployments need a wildcard DNS record and certificate for the sandbox origin. Wildcard certificates require an ACME DNS-01 challenge, so the installer needs a DNS-provider API credential or an operator-supplied wildcard certificate (ADR-0019).
