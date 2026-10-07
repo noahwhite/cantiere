@@ -176,7 +176,7 @@ Each deployment registers its own public GitHub App, so it can work on any user'
 | GH-3 | The control plane records every installation (account, installation ID, repos, granted permissions) and acts only on installations and repos an operator approved; webhooks from other installations are dropped and logged | M |
 | GH-4 | PR and issue commands (IN-2) start or steer a session only when the commenter has write access to the repo and is an approved user | M |
 | GH-5 | Session tokens (ID-2) are minted from the installation that owns each target repo, limited to that repo and the persona's declared permissions; reviewer and QA tokens carry no write permissions | M |
-| GH-6 | Users link their GitHub account through the app's user authorization (OAuth); the server keeps the refresh token in the secret store, and short-lived user access tokens are applied only at the worker, never inside the sandbox (ID-2); user tokens cannot be narrowed to the persona's permissions, so every use passes the persona's policy check (SEC-5); tokens are requested restricted to the session's target repo (GitHub's repository\_id parameter) where GitHub allows it, as defense in depth only (ADR-0012) | M |
+| GH-6 | Users link their GitHub account through the app's user authorization (OAuth); the server keeps the refresh token in the secret store, and short-lived user access tokens are applied only at the worker, never inside the sandbox (ADR-0010); user tokens cannot be narrowed to the persona's permissions, so every use passes the persona's policy check (ADR-0015) and is audited (SEC-5); tokens are requested restricted to the session's target repo (GitHub's repository\_id parameter) where GitHub allows it, as defense in depth only (ADR-0012) | M |
 | GH-7 | Per persona or session, PRs, commits and comments are authored as the app bot (default) or as the linked user; reviewer personas always post as the bot | M |
 | GH-8 | In user-authored mode, commits are signed with a key registered to that user's GitHub account so they show as Verified; otherwise the bot stays committer and the user is credited as co-author (SEC-7) | M |
 | GH-9 | Unlinking revokes the user's token at GitHub and pauses that user's running sessions to the inbox | S |
@@ -225,7 +225,7 @@ Security is the main reason to move off the current containers, so these are all
 
 | ID | Requirement | Pri |
 | --- | --- | --- |
-| SEC-1 | Sandboxes get a VM-grade boundary: a hardware-virtualized microVM such as Firecracker or Cloud Hypervisor; containers and userspace kernels such as gVisor do not qualify; no host Docker socket, no `NET_ADMIN`, no unconfined seccomp | M |
+| SEC-1 | Sandboxes get a VM-grade boundary: a hardware-virtualized microVM such as Firecracker or Cloud Hypervisor; plain containers and userspace kernels such as gVisor do not qualify; no host Docker socket, no `NET_ADMIN`, no unconfined seccomp | M |
 | SEC-2 | Default-deny egress with per-blueprint allowlists by domain, enforced outside the sandbox (proxy), with every denied request logged | M |
 | SEC-3 | Tailscale or WireGuard reach to dev hosts only for personas that declare it, with a per-session ephemeral node and ACL tag | M |
 | SEC-4 | Reviewer and QA sandboxes are read-only for git and production systems by construction, not by prompt | M |
@@ -238,9 +238,9 @@ Security is the main reason to move off the current containers, so these are all
 | ID | Requirement | Pri |
 | --- | --- | --- |
 | ID-1 | Secrets live in an external store behind a pluggable interface (OSS-3), resolved by reference at session start; OpenBao is the first implementation and the only one that mints dynamic credentials (ID-2); Bitwarden Secrets Manager is supported for static secrets; Vault or Infisical may follow (ADR-0010) | M |
-| ID-2 | Credentials are minted per session and short-lived: GitHub App installation tokens scoped to the session's repos, Linear and cloud tokens via broker; nothing long-lived enters the sandbox | M |
+| ID-2 | Credentials are minted per session and short-lived: GitHub App installation tokens scoped to the session's repos, Linear and cloud tokens via broker; nothing long-lived enters the sandbox, and in practice only credentials with no injectable header enter it at all (ADR-0010) | M |
 | ID-3 | Personas declare required secrets; a session receives only those, never the union | M |
-| ID-4 | The platform never passes secrets in argv or writes them to files, logs or the timeline; session output (events, terminal recordings, artifacts) is scrubbed for every known secret value, placeholder and token pattern before it leaves the worker; encoded copies made by guest code are not caught, which is why credentials stay outside the sandbox (ID-2) | M |
+| ID-4 | The platform never passes secrets in argv or writes them to files, logs or the timeline; session output (events, terminal recordings, artifacts) is scrubbed for every known secret value, placeholder and token pattern before it leaves the worker; encoded copies made by guest code are not caught, which is why credentials stay outside the sandbox (ADR-0010) | M |
 | ID-5 | Separate bot identities per role where the provider supports it (implementer vs reviewer vs QA), so a reviewer token cannot push | S |
 | ID-6 | OIDC from sandbox to cloud providers instead of static keys where supported | C |
 
@@ -249,7 +249,7 @@ Security is the main reason to move off the current containers, so these are all
 | ID | Requirement | Pri |
 | --- | --- | --- |
 | COST-1 | Live spend per session (tokens x model price), aggregated per issue, persona and day; API-key sessions are metered at the model gateway outside the sandbox, which is authoritative; subscription sessions use runtime-reported usage, a notional API-equivalent figure, and the provider's usage-limit windows are tracked separately | M |
-| COST-2 | Hard budget caps per session and per day: API-key sessions are capped at the model gateway outside the sandbox, so spend cannot pass the cap except by provider-side usage a response does not report, which is reconciled on the next request; subscription sessions are capped best effort on their notional spend (COST-1) by the runtime adapter (ADR-0014); at the cap the session pauses and posts to the inbox | M |
+| COST-2 | Budget caps per session and per day, hard for API-key sessions: they are capped at the model gateway outside the sandbox, so spend cannot pass the cap except by provider-side usage a response does not report, which is reconciled on the next request; subscription sessions are capped best effort on their notional spend (COST-1) by the runtime adapter (ADR-0014); at the cap the session pauses and posts to the inbox | M |
 | COST-3 | Support subscription-auth runtimes (Claude Code setup-token, ChatGPT sign-in for Codex or opencode) alongside API keys; subscription mode is opt-in and available only when the deployment's single user is both the subscriber and the operator, on infrastructure only they control; multi-user deployments cannot enable it; it places the subscriber's own token in that subscriber's sessions, a permanent exception to ID-2 (ADR-0014) | M |
 | COST-4 | One 16-core / 64 GB host runs 10 concurrent sessions at Officina workload; sandboxes have CPU, memory and disk quotas | M |
 | COST-5 | Add worker hosts by registration; the scheduler places sessions by free capacity | S |
