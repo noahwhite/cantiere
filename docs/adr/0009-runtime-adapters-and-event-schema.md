@@ -55,7 +55,7 @@ Adding an ACP agent is a template and config change; the conformance suite below
 
 **Slash commands.**
 
-- Users' skills, custom commands, plugin commands and MCP prompts reach the sandbox through the skills drive and the repo checkout (ADR-0008), so they run exactly as in a terminal, except in Claude subscription sessions, which do not load the target repository's Claude Code settings, hooks or `.mcp.json` (ADR-0014).
+- Users' skills, custom commands, plugin commands and MCP prompts reach the sandbox through the skills drive and the repo checkout (ADR-0008), so they run exactly as in a terminal; in Claude subscription sessions the target repository's Claude Code settings, hooks and `.mcp.json` do not load (ADR-0014).
 - The adapter emits a `commands_available` event from the runtime's own advertisement (table above), and the UI's `/` palette is built from it (ADR-0013). Cantiere keeps no command list of its own.
 - A message starting with `/` is passed to the runtime unchanged. Claude Code expands it in headless mode, including built-ins that work without a terminal (`/compact`, `/clear`, `/context`, `/model <name>`, `/config key=value` and others); ACP agents receive it as prompt text, which is how ACP defines command dispatch.
 - Built-ins whose job belongs to the platform are platform actions, not runtime commands: resume and rewind are session history and checkpoints, `/agents` is child sessions, `/permissions` is policy (ADR-0015), and `/login` is not needed while credentials are injected (ADR-0010, ADR-0014); the per-session login alternative in ADR-0014 runs it through native-terminal take-over. The palette shows these as Cantiere actions.
