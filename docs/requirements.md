@@ -32,7 +32,7 @@ Today each agent runs in a long-lived Docker container per CLI (`claude-dev-cont
 ### Success measures
 
 - Run 10 or more concurrent sessions on one host without cross-talk (today: about 3 to 4 terminals).
-- Zero long-lived credentials inside a sandbox: every secret short-lived and scoped to the session.
+- Zero long-lived credentials inside a sandbox: every secret short-lived and scoped to the session (subscription logins excepted until resolved, see COST-3).
 - Every merged Officina PR traceable to a session record (plan, commands, review evidence).
 - Retire the three terminal containers for day-to-day Officina work.
 
@@ -67,7 +67,7 @@ SWE-2 cannot run on this platform: it has no API, no weights and no self-host pa
 | Effort levels | Medium, High (recommended), Max |
 | Claimed gains vs SWE-1.7 | 58% fewer turns, 81% lower cost, first code edit at median step 18 instead of 48 |
 | Benchmarks | FrontierCode 1.1: 50.0% vs Fable 5.1 at 50.9%; Terminal-Bench 4: 27.3% vs GPT-6 Astra at 57.9%; each model scored in its own harness, so not like-for-like |
-| Price | $0.75 input / $3.75 output per 1M tokens; Devin credit multiplier 6 / 9 / 12 by effort |
+| Price | $3 input / $15 output per 1M tokens list price (free on self-serve plans through Oct 15, 2026; $0.75 / $3.75 for credit-based enterprise customers through Dec 31, 2026); Devin credit multiplier 6 / 9 / 12 by effort |
 | Availability | Devin Desktop (formerly Windsurf), Devin CLI, Devin Web and Fusion only; no public API, no Hugging Face weights, no OpenRouter listing |
 
 What Officina takes from it:
@@ -125,13 +125,13 @@ The primary user is a solo founder-engineer running a team of agents; the agent 
 
 ## Functional requirements
 
-Priorities use MoSCoW: M = MVP, S = phase 2, C = later, W = won't do. Each ID is meant to become one or more OFF stories.
+Priorities use MoSCoW: M = must (Phase 1 or 2), S = should (Phase 2 to 4), C = could (Phase 4 or later), W = won't do. Each ID is meant to become one or more OFF stories.
 
 ### Sessions and sandboxes
 
 | ID | Requirement | Pri |
 | --- | --- | --- |
-| SB-1 | Each session runs in its own sandbox (microVM or rootless container) booted from a prebuilt snapshot in under 30 s | M |
+| SB-1 | Each session runs in its own sandbox (microVM or gVisor-sandboxed container) booted from a prebuilt snapshot in under 30 s | M |
 | SB-2 | Environment is defined as code in the repo (`.agent/blueprint.yaml`): base image, toolchains, repo clones, setup and maintenance commands, services | M |
 | SB-3 | Snapshots rebuild on blueprint change and nightly; a failed build keeps the last good snapshot and alerts | M |
 | SB-4 | Multi-repo sessions: clone several repos (e.g. `officina`, `officina-site`, `linear-config`) with per-repo blueprint layers | M |
@@ -176,7 +176,7 @@ Each deployment registers its own public GitHub App, so it can work on any user'
 | GH-3 | The control plane records every installation (account, installation ID, repos, granted permissions) and acts only on installations and repos an operator approved; webhooks from other installations are dropped and logged | M |
 | GH-4 | PR and issue commands (IN-2) start or steer a session only when the commenter has write access to the repo and is an approved user | M |
 | GH-5 | Session tokens (ID-2) are minted from the installation that owns each target repo, limited to that repo and the persona's declared permissions; reviewer and QA tokens carry no write permissions | M |
-| GH-6 | Users link their GitHub account through the app's user authorization (OAuth); the broker holds the refresh token and the sandbox gets only a short-lived user access token, which GitHub limits to the intersection of app permissions and the user's own access | M |
+| GH-6 | Users link their GitHub account through the app's user authorization (OAuth); the broker holds the refresh token and the sandbox gets only a short-lived user access token restricted to the session's target repo (GitHub's repository\_id parameter); user tokens cannot be narrowed to the persona's permissions, so any action outside them goes through the broker | M |
 | GH-7 | Per persona or session, PRs, commits and comments are authored as the app bot (default) or as the linked user; reviewer personas always post as the bot | M |
 | GH-8 | In user-authored mode, commits are signed with a key registered to that user's GitHub account so they show as Verified; otherwise the bot stays committer and the user is credited as co-author (SEC-7) | M |
 | GH-9 | Unlinking revokes the user's token at GitHub and pauses that user's running sessions to the inbox | S |
@@ -219,7 +219,7 @@ Each deployment registers its own public GitHub App, so it can work on any user'
 
 ## Non-functional requirements
 
-Security is the main reason to move off the current containers, so these are all MVP unless marked.
+Security is the main reason to move off the current containers, so these are all M unless marked.
 
 ### Security and isolation
 
@@ -248,9 +248,9 @@ Security is the main reason to move off the current containers, so these are all
 
 | ID | Requirement | Pri |
 | --- | --- | --- |
-| COST-1 | Live spend per session from runtime events (tokens x model price), aggregated per issue, persona and day | M |
+| COST-1 | Live spend per session from runtime events (tokens x model price), aggregated per issue, persona and day; for subscription runtimes this is a notional API-equivalent figure, and the provider's usage-limit windows are tracked separately | M |
 | COST-2 | Hard budget caps per session and per day; at the cap the session pauses and posts to the inbox | M |
-| COST-3 | Support subscription-auth runtimes (Claude Code OAuth, Codex login) alongside API keys, with per-session isolated auth homes | M |
+| COST-3 | Support subscription-auth runtimes (Claude Code OAuth, Codex login) alongside API keys, with per-session isolated auth homes; these logins keep a refresh credential in that home, an exception to ID-2 until Phase 0 shows the broker can hold it and pass only access tokens to the sandbox | M |
 | COST-4 | One 16-core / 64 GB host runs 10 concurrent sessions at Officina workload; sandboxes have CPU, memory and disk quotas | M |
 | COST-5 | Add worker hosts by registration; the scheduler places sessions by free capacity | S |
 
@@ -276,7 +276,7 @@ Security is the main reason to move off the current containers, so these are all
 
 ## Architecture and build vs reuse
 
-A thin control plane schedules sandboxes and runs workflows; secrets, egress and images are handled by services outside the sandbox, so a compromised agent holds nothing long-lived.
+A thin control plane schedules sandboxes and runs workflows; secrets, egress and images are handled by services outside the sandbox, so a compromised agent holds nothing long-lived (except a subscription login, see COST-3).
 
 [![Platform architecture: control plane, brokers, worker sandboxes](architecture.svg)](architecture.svg)
 
@@ -319,10 +319,10 @@ Later option: a hosted control plane (UI, workflows, integrations) with customer
 
 ### Phased roadmap (one epic per phase)
 
-1. **Phase 0 - Spike (timebox 1 week):** compare OpenHands runtime, Coder, E2B/microsandbox and plain Firecracker for SB-1, SEC-1, SEC-2; run one Claude Code session headless end to end. Exit: sandbox backend chosen, ADR merged.
-2. **Phase 1 - Single-session MVP:** SB-1..6, RT-1..4, RT-6, IN-3, IN-4, GH-1..3, GH-5..8, UX-1..5, SEC-1..5, SEC-7, ID-1..4, COST-1..4, OBS-1..3, OSS-1..4, OSS-6. Exit: one Officina story implemented through PR from the web UI with no terminal container.
-3. **Phase 2 - Ticket-driven and orchestrated:** IN-1, IN-2, GH-4, IN-5, UX-6..8, WF-1..7. Exit: assigning an OFF story runs the full reference workflow to a merge-approval request; reviewers run read-only.
-4. **Phase 3 - Always-on:** IN-6..8, SB-7, RT-5, KN-2, KN-4, ID-5, GH-9, COST-5, OBS-4, SEC-6. Exit: terminal containers retired; QA and PagerDuty sessions start without a human.
+1. **Phase 0 - Spike (timebox 1 week):** compare OpenHands runtime, Coder, E2B/microsandbox and plain Firecracker for SB-1, SEC-1, SEC-2; test broker-held subscription credentials (COST-3); run one Claude Code session headless end to end. Exit: sandbox backend chosen, ADR merged.
+2. **Phase 1 - Single-session MVP:** SB-1..6, RT-1..4, RT-6, IN-3, IN-4, GH-1..3, GH-5..8, UX-1..5, SEC-1..5, SEC-7, ID-1..4, KN-1, COST-1..4, OBS-1..3, OSS-1..4, OSS-6. Exit: one Officina story implemented through PR from the web UI with no terminal container.
+3. **Phase 2 - Ticket-driven and orchestrated:** IN-1, IN-2, GH-4, IN-5, UX-6..8, WF-1..7, SEC-6. Exit: assigning an OFF story runs the full reference workflow to a merge-approval request; reviewers run read-only.
+4. **Phase 3 - Always-on:** IN-6..8, SB-7, RT-5, KN-2, KN-4, ID-5, GH-9, COST-5, OBS-4. Exit: terminal containers retired; QA and PagerDuty sessions start without a human.
 5. **Phase 4 - Community:** OSS-5, KN-3, SB-8, ID-6, GH-10, GitHub Issues and Jira providers, first external release.
 
 ### Open questions
