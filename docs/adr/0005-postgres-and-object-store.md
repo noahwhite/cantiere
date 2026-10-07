@@ -20,7 +20,7 @@ Every extra stateful service (message broker, workflow server, search engine) is
 
 ## Consequences
 
-- Backup and restore covers the Cantiere database and OpenBao's database (two `pg_dump`s, ADR-0010), the bucket, and OpenBao's unseal key stored separately (ADR-0019); on a self-hosted install with MinIO, that bucket is the MinIO volume, which is a second durable store to back up.
+- Backup and restore covers the Cantiere database and OpenBao's database (two `pg_dump`s, ADR-0010), the cluster's roles and grants (`pg_dumpall --globals-only`, since `pg_dump` omits them), the bucket, and OpenBao's unseal key stored separately (ADR-0019). The backup dumps Cantiere first and OpenBao second, so every secret reference in the Cantiere dump has its value in the OpenBao dump; a restore loads roles, then OpenBao, then Cantiere, and reports any reference that does not resolve; on a self-hosted install with MinIO, that bucket is the MinIO volume, which is a second durable store to back up.
 - Event volume is bounded by partitioning and offloading large payloads; if a deployment outgrows it, the timeline store is behind an interface and can move.
 - Full-text search across sessions (KN-2, Phase 3) starts with Postgres full-text search and can add a dedicated index later.
 
