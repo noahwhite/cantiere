@@ -1,6 +1,6 @@
-# ADR-0012: Per-deployment GitHub App, optional user linking, and Verified commits without keys in the sandbox
+# ADR-0012: Per-deployment GitHub App, optional user linking, and Verified commits signed through a forwarded agent
 
-- Status: Proposed - accept when validation checks 1 and 3 below pass, with check 2 passing or its fallback in use (Phase 1, slice 1; they need the git proxy)
+- Status: Proposed - accept when validation check 1 below passes, with checks 2 and 3 passing or their fallbacks in use (Phase 1, slice 1; they need the git proxy)
 - Date: 2026-10-07
 - Requirements: GH-1, GH-2, GH-3, GH-5, GH-6, GH-7, GH-8, SEC-5, SEC-7
 
@@ -19,42 +19,42 @@ This ADR records how that is built on top of ADR-0010, where no GitHub credentia
 
 **User linking (GH-6).** The user authorizes the app through its user authorization flow, and the server stores the refresh token in the secret store under that user. User access tokens are requested with `repository_id` where GitHub supports it ([docs](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-user-access-token-for-a-github-app)). That parameter is not accepted on refresh, so it is defense in depth only: the token is applied only by the worker proxies, whose policy enforces the persona's permissions (ADR-0010). GitHub rotates the refresh token on every use, so one serialized refresher per user (a Postgres advisory lock in the server) refreshes and stores it, and sessions only ever receive access tokens.
 
-**Authoring mode (GH-7).** Per persona and per session: `bot` (default) or `user`. Reviewer personas are always `bot`. PRs and comments use the matching token.
+**Authoring mode (GH-7).** Per persona and per session: `bot` (default) or `user`. Reviewer personas are always `bot`. PRs and comments use the matching token; commits use the matching commit identity below.
 
-**Verified commits at push time (GH-8, SEC-7).** The agent commits locally, unsigned; nothing in the sandbox can obtain a signature. When the guest pushes the session branch, the git proxy:
+**Commit identity (GH-7, GH-8).** A GitHub App cannot hold a signing key, so `bot`-mode commits come from a machine user the deployment owns: the setup wizard asks the operator to create one, with a verified email, and to link it like any user (GH-6).
+It needs no access to any repo, because GitHub verifies a signature against the committer's account, not repo membership.
+PRs and comments in `bot` mode still come from the app.
+In `user` mode, commits come from the linked user.
+A `bot`-mode session with a linked user credits that user with a `Co-authored-by` trailer.
 
-1. Rejects merge commits and anything not on the session branch, and runs the secret scan (ADR-0010).
-2. Force-pushes the original objects to a short-lived staging branch `cantiere-staging/<session-id>` with the installation token, so every blob and tree already exists on GitHub.
-3. Recreates each commit with the same tree:
-   - `bot` mode: one `POST /repos/{owner}/{repo}/git/commits` call per commit with the installation token and no author, committer or signature, so GitHub signs it as the app and shows it Verified ([commit signature verification](https://docs.github.com/en/authentication/managing-commit-signature-verification/about-commit-signature-verification)); a linked user is credited with a `Co-authored-by` trailer;
-   - `user` mode: the worker builds each commit object itself (with `gix`), with the user as author and committer and a `gpgsig` SSH signature computed with the user's SSH signing key (`ssh-key`), and pushes them over git to the session branch with the user's token. GitHub verifies SSH commit signatures from git pushes; its commits API documents its `signature` field as PGP only, so that API is not used here. The key is generated at link time, stored in the secret store, and registered on the user's account through the app's user permission for SSH signing keys. The worker signs only commit objects it is itself creating for this push.
-4. Moves the session branch to the recreated head (in `user` mode, the step 3 push already did), deletes the staging branch, and returns the new SHAs.
+**Signing through a forwarded agent (GH-8, SEC-7).** At session start the worker generates an SSH signing key for the session's commit identity, records it, and registers it on that account with the identity's user token (`POST /user/ssh_signing_keys`, through the app's user permission for SSH signing keys).
+The private key stays in the worker; the guest reaches it through the session's SSH agent socket (ADR-0010), and its git config sets the identity's name and email, `gpg.format=ssh`, `user.signingkey` to the public key, and `commit.gpgsign=true`.
+The coding agent commits with plain `git commit`, which signs through the SSH agent, so commits are signed when they are made and their SHAs never change.
+The SSH agent signs with this key only requests in git's `git` signature namespace and writes the hash of each signed payload to the audit log (ADR-0015); it never uses the SSH-to-hosts key for such requests.
+At session end the SSH agent dies, and the worker deletes the key from GitHub and discards it; the server deletes any recorded key of an ended session that the worker did not, so a crashed worker cannot leave one registered.
 
-In `bot` mode this costs one API call per commit, independent of the number of files, which stays well inside GitHub's content-creation rate limits.
-The guest performs pushes through its own `git push` wrapper, which holds the repository lock for the push. After a successful push it rebases any commits made in the meantime onto the recreated head; the trees are identical, so the rebase cannot conflict.
+**Push checks (SEC-7).** When the guest pushes the session branch, the git proxy:
+
+1. Rejects anything not on the session branch, and runs the secret scan (ADR-0010).
+2. Rejects the push unless every commit not already on GitHub is signed by the session's signing key, has the session's commit identity as author and committer, and, in `bot` mode with a linked user, carries that user's `Co-authored-by` trailer.
+3. Pushes with the installation token in `bot` mode or the user's token in `user` mode.
+
+Every commit on a session branch, and therefore in any PR, is signed; there is no unsigned fallback (SEC-7; the project owner decided this on 2026-10-08).
+Each refused push is written to the audit log (ADR-0015).
 
 ## Validation checks
 
-1. Recreated bot commits show Verified, keep the original tree (file modes, symlinks), and the guest branch update leaves a clean working tree.
-2. The app can register a user SSH signing key with a user token, and worker-built commits signed with that key and pushed over git show Verified as the user, with the original tree.
-3. Pushes to `cantiere-staging/*` are allowed by the target repo's rulesets, and staging branches do not trigger CI (the reference workflow ignores the prefix).
+1. A per-session key registered on the machine user signs guest commits through the agent, and the pushed commits show Verified as the machine user.
+2. The same holds in `user` mode, with the key registered through the linked user's token, and the commits show Verified as the user.
+3. Commits pushed while a session key was registered stay Verified after the key is deleted from GitHub (GitHub records verification at push time and keeps it when keys are [rotated or revoked](https://docs.github.com/en/authentication/managing-commit-signature-verification/about-commit-signature-verification); deletion is not documented).
 
-Every commit on a session branch, and therefore in any PR, is signed; there is no unsigned fallback (SEC-7; the project owner decided this on 2026-10-08).
-The only unsigned commits that reach GitHub are the originals on the `cantiere-staging/<session-id>` branch from step 2, which exists only to upload objects, is never opened as a PR and is deleted in step 4.
-The session branch moves only as a fast-forward from the head the guest last pushed (a ref update with `force` false in `bot` mode, a plain git push in `user` mode), so a stale or repeated move is rejected and never overwrites.
-A failure before the move leaves the session branch unchanged, and the guest retries from the same head.
-If the move's outcome is unknown, for example after an abort or a lost response, the retry's move is rejected because the branch has already advanced; the proxy then reads the branch and, if the commits it added since the guest's base match, in order, the commits this push would create (the same trees, the messages the proxy writes including any `Co-authored-by` trailer, and in `user` mode the same author and committer), differ only in timestamps and signatures, and are signed by the identity this push uses, returns their SHAs as the result; otherwise, including when other commits follow them, it returns the rejection, and the guest fetches and rebases as after any non-fast-forward.
-The worker deletes the staging branch at the end of every push, successful or not.
-In case the worker crashes instead, the server durably records each staging branch before every push to it (a later push in the same session refreshes the record), so a crash leaves a record with no branch, never a branch with no record.
-The git proxy aborts a push still running after 30 minutes, and every hour the server deletes each `cantiere-staging/*` branch whose record is more than 90 minutes old, without relying on worker state; it then deletes the record only if the record has not been refreshed since it was read, so a push that refreshed it keeps a record for a later sweep.
-If the sweep removes the staging branch of a push still running, that push succeeds, fails before the move, or is settled as above, so correctness never depends on these timings.
-After the sweep no unsigned commit stays on any branch, though GitHub may keep the uploaded objects unreferenced until its own garbage collection.
-If check 1 fails, the git proxy refuses bot-mode pushes, and Phase 1 does not exit until bot commits pass check 1, because `bot` is the default mode (GH-7) and test 11 requires Verified bot commits.
-Each refused push is written to the audit log (ADR-0015).
-If check 2 fails, `user` mode falls back to bot commits with the user as co-author, as GH-8 already allows.
+If check 1 fails, the git proxy refuses `bot`-mode pushes, and Phase 1 does not exit until check 1 passes, because `bot` is the default mode (GH-7) and test 11 requires Verified bot commits.
+If check 2 fails, `user` mode falls back to machine-user commits with the user as co-author, as GH-8 already allows.
+If check 3 fails, each identity gets one long-lived signing key instead, generated at link time, held in the secret store and loaded into the session's agent; it is still never in the sandbox, but signatures it made stay valid until the key is rotated.
 
 ## Consequences
 
-- No GitHub credential or signing key ever enters a sandbox.
-- Local SHAs change after each push in both modes; tools that cache SHAs across a push must re-read the branch, and the adapter adds a timeline note when it happens.
-- The user's signing key never signs anything the sandbox chose to have signed, only commits the worker builds from audited pushes.
+- No GitHub credential or signing key ever enters a sandbox; the guest holds only the agent socket.
+- Git works as in a terminal: commits are signed when made, SHAs do not change at push, and there is no staging branch or commit recreation.
+- `bot`-mode commits show the deployment's machine user, not the app, as author and committer.
+- The SSH agent is a signing oracle for the session's lifetime: code in the sandbox can get commits signed that the proxy never sees. Such a commit verifies only as the session's identity, and only if pushed to GitHub before the key is deleted at session end (check 3). Egress goes only through the worker's proxies (ADR-0007), and every signature is audited, so the audit log shows any signature that matches no pushed commit.

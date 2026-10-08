@@ -80,7 +80,7 @@ flowchart TB
 | --- | --- | --- |
 | `cantiere-server` (Java, Quarkus) | API, UI, session workflows, scheduling, policy, audit, timeline, GitHub App, secret resolution | 0003, 0005, 0006, 0012, 0015, 0016 |
 | `cantiere-worker` (Rust) | VMs, templates, network namespaces, egress and git proxies, push-time commit signing, model gateway, stream relay | 0007, 0008, 0010, 0011, 0012, 0013, 0014 |
-| `cantiere-guest` (Rust) | Runtime adapters (Claude Code native, ACP), event normalization, slash-command discovery, PTYs, editor and VNC tunnels, push wrapper | 0009, 0012, 0013 |
+| `cantiere-guest` (Rust) | Runtime adapters (Claude Code native, ACP), event normalization, slash-command discovery, PTYs, editor and VNC tunnels, git identity and signing setup | 0009, 0012, 0013 |
 | Config repo | Personas, org blueprint layer, skills reference, workflows later | 0017 |
 | Target repos | `.agent/blueprint.yaml`, `CLAUDE.md` / `AGENTS.md` | 0008, 0009 |
 
@@ -112,7 +112,7 @@ sequenceDiagram
         S-->>G: Delivered at next turn (message or /command)
     end
     G->>W: git push (session branch)
-    W->>W: Policy check, secret scan, recreate and sign commits
+    W->>W: Policy check, secret scan, signature check
     W->>X: Verified commits + PR as bot or linked user
     S->>U: Inbox: PR ready
     S->>W: Tear down VM, revoke tokens, flush artifacts
@@ -175,7 +175,7 @@ Each item's pass condition is written in its ADR.
 | 8 | Phase 1, slice 1 | CA, proxy trust and domain allowlist | Claude Code, `git`, `gh`, Docker pulls, Maven and npm work through the proxy with the per-session CA; non-allowlisted domains are denied and every denial is logged | 0010, 0011 |
 | 9 | Phase 1, slice 1 | Model gateway | Claude Code runs end to end against the gateway with a placeholder key; usage metered and priced from the config-repo price table | 0014 |
 | 10 | Phase 1, slice 1 | GitHub API policy | Session token cannot update refs, merge, or mutate other repos via REST or GraphQL | 0010 |
-| 11 | Phase 1, slice 1 | Push-time signing | Recreated bot commits show Verified and keep trees; user commits show Verified as the user, or, if ADR-0012 check 2 fails, user mode falls back to Verified bot commits with the user as co-author (GH-8) | 0012 |
+| 11 | Phase 1, slice 1 | Push-time signing | Bot commits signed through the session agent show Verified as the machine user; user commits show Verified as the user, or, if ADR-0012 check 2 fails, user mode falls back to Verified machine-user commits with the user as co-author (GH-8); unsigned commits are refused | 0012 |
 | 12 | Phase 1, slice 1 | Durable step atomicity | A DBOS step that writes a row through the jOOQ step factory and is killed before returning leaves both the row and the checkpoint, or neither | 0006 |
 | 13 | Phase 1, slice 1 | OpenBao dynamic credentials | A PostgreSQL role and a MySQL user issued with a TTL equal to the session maximum stop working, and their open connections are closed, at session end by server revocation and at expiry with the server stopped, including for a guest that reconnects in a loop during revocation; SSH through the worker agent works during the session and fails after it ends, even with the certificate copied out of the guest | 0010 |
 

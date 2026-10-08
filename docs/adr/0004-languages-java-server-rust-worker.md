@@ -31,7 +31,7 @@ The maintainers already run Officina on Quarkus.
 | gRPC | `tonic` |
 | TLS and per-session CA | `rustls`, `rcgen` |
 | HTTP proxies and model gateway | `hyper` |
-| Git proxy and commit recreation | `gix` |
+| Git proxy and push signature checks | `gix` |
 | SSH commit signatures | `ssh-key` (SSHSIG) |
 | OCI images | `oci-spec`, `oci-client` |
 | ACP client | [`agent-client-protocol`](https://crates.io/crates/agent-client-protocol) (ADR-0009) |

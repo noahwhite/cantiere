@@ -16,7 +16,7 @@ The architecture these decisions add up to is in [architecture.md](../architectu
 | [0009](0009-runtime-adapters-and-event-schema.md) | Claude Code over its native headless protocol, other agents over ACP, one event schema | Accepted |
 | [0010](0010-credentials-stay-outside-the-sandbox.md) | Credentials applied at the worker boundary, not inside the sandbox | Accepted |
 | [0011](0011-network-egress-and-tailnet-access.md) | Default-deny egress on the host, per-session proxy, ephemeral tailnet nodes | Accepted |
-| [0012](0012-github-app-identity-and-commit-signing.md) | GitHub App, user linking, push-time commit recreation and signing | Proposed - Phase 1 slice 1 checks |
+| [0012](0012-github-app-identity-and-commit-signing.md) | GitHub App, user linking, commit signing through a forwarded agent | Proposed - Phase 1 slice 1 checks |
 | [0013](0013-live-session-transport-and-takeover.md) | Live streams over vsock and the worker channel; command palette; take-over, including the native terminal UI | Accepted |
 | [0014](0014-model-credentials-gateway-and-subscriptions.md) | Model gateway for API keys; subscription logins stay the user's own | Accepted |
 | [0015](0015-policy-engine-and-audit-log.md) | One policy decision point, hash-chained audit log | Accepted |

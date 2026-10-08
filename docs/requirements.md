@@ -177,8 +177,8 @@ Each deployment registers its own public GitHub App, so it can work on any user'
 | GH-4 | PR and issue commands (IN-2) start or steer a session only when the commenter has write access to the repo and is an approved user | M |
 | GH-5 | Session tokens (ID-2) are minted from the installation that owns each target repo, limited to that repo and the persona's declared permissions; reviewer and QA tokens carry no write permissions | M |
 | GH-6 | Users link their GitHub account through the app's user authorization (OAuth); the server keeps the refresh token in the secret store, and short-lived user access tokens are applied only at the worker, never inside the sandbox (ADR-0010); user tokens cannot be narrowed to the persona's permissions, so every use passes the persona's policy check (ADR-0015) and is audited (SEC-5); tokens are requested restricted to the session's target repo (GitHub's repository\_id parameter) where GitHub allows it, as defense in depth only (ADR-0012) | M |
-| GH-7 | Per persona or session, PRs, commits and comments are authored as the app bot (default) or as the linked user; reviewer personas always post as the bot | M |
-| GH-8 | In user-authored mode, commits are signed with a key registered to that user's GitHub account so they show as Verified; otherwise the bot stays committer and the user is credited as co-author (SEC-7) | M |
+| GH-7 | Per persona or session, PRs and comments are authored as the app bot (default) or as the linked user, and commits as the deployment's machine user (default) or as the linked user; reviewer personas always post as the bot | M |
+| GH-8 | In user-authored mode, commits are signed with a key registered to that user's GitHub account so they show as Verified; otherwise the deployment's machine user stays committer and the user is credited as co-author (SEC-7) | M |
 | GH-9 | Unlinking revokes the user's token at GitHub and pauses that user's running sessions to the inbox | S |
 | GH-10 | GitHub Enterprise Server: the same app model against a configurable GitHub host | C |
 
