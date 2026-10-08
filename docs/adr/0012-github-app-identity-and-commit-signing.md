@@ -43,8 +43,9 @@ Every commit on a session branch, and therefore in any PR, is signed; there is n
 The only unsigned commits that reach GitHub are the originals on the `cantiere-staging/<session-id>` branch from step 2, which exists only to upload objects, is never opened as a PR and is deleted in step 4.
 If a push fails after step 2, the worker deletes the staging branch before returning the error.
 In case the worker crashes instead, the server durably records each staging branch, with a timestamp from the server's clock, before every push to it (a later push in the same session refreshes the record), so a crash between the two leaves a record with no branch, never a branch with no record.
-The git proxy starts steps 2 to 4 only after the server, reading its own clock, confirms the record is less than 30 minutes old, and it aborts them if they are still running 30 minutes after they start.
+The git proxy starts steps 2 to 4 only after the server, reading its own clock, confirms the record is less than 30 minutes old; it discards a confirmation not used within one minute and aborts steps still running 30 minutes after they start, both measured on its monotonic clock.
 Every hour, the server deletes each `cantiere-staging/*` branch whose record is more than 90 minutes old; this leaves 30 minutes of margin after the latest a push can end, and does not rely on worker state.
+A push stalled past these bounds may lose its staging branch to the sweep; it then fails and the guest retries, and nothing unsigned is left behind.
 If check 1 fails, the git proxy refuses bot-mode pushes, and Phase 1 does not exit until bot commits pass check 1, because `bot` is the default mode (GH-7) and test 11 requires Verified bot commits.
 Each refused push is written to the audit log (ADR-0015).
 If check 2 fails, `user` mode falls back to bot commits with the user as co-author, as GH-8 already allows.
