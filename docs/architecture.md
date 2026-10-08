@@ -139,7 +139,7 @@ Untrusted content (issue text, PR comments, web pages, tool output) is tagged on
 | SB-2, SB-3, SB-4, SB-5, RT-4 | 0008 |
 | RT-1 (partial: Claude Code only; opencode and Codex in Phase 2), RT-2, RT-3, RT-6, KN-1 | 0009, 0008 |
 | IN-3, IN-4 | 0016 and the public API above |
-| GH-1, GH-2, GH-3, GH-5, GH-6, GH-7, GH-8 | 0012, 0010 |
+| GH-1, GH-2, GH-3, GH-5, GH-6, GH-7, GH-8, GH-9 | 0012, 0010 |
 | UX-1, UX-2, UX-3, UX-4, UX-5 | 0013, 0009, 0005 |
 | SEC-2, SEC-3 | 0011 |
 | SEC-4, SEC-5 | 0015, 0010 |
