@@ -26,7 +26,8 @@ It needs no access to any repo, because GitHub verifies a signature against the 
 PRs and comments in `bot` mode still come from the app.
 In `user` mode, commits come from the linked user.
 Either identity commits with its account's ID-based GitHub no-reply address (`<id>+<login>@users.noreply.github.com`), which GitHub ties to the account, so verification does not depend on which emails a user has made public or verified, and the app needs no email permission.
-Some accounts created before July 2017 still use `<login>@users.noreply.github.com` until their email privacy setting is changed ([email addresses reference](https://docs.github.com/en/account-and-profile/reference/email-addresses-reference)), so linking asks the user to turn email privacy off and on once if needed, and after each push the proxy reads the head commit's verification through the commits API and reports a `no_user` or `unverified_email` result in the timeline.
+Some accounts created before July 2017 still use `<login>@users.noreply.github.com` until their email privacy setting is changed ([email addresses reference](https://docs.github.com/en/account-and-profile/reference/email-addresses-reference)), so linking an identity, and setting up the machine user, ends with a probe: the worker signs a throwaway commit with a temporary key registered on the account and that address as committer, pushes it with the installation token to a `cantiere-probe/<user-id>` branch in the config repo (ADR-0017), reads its verification through the commits API, then deletes the branch and the key.
+If the probe is not Verified, linking shows the user how to switch to the ID-based address and `user` mode stays off for them until a later probe passes; the machine user's setup does not complete until its probe passes.
 A `bot`-mode session with a linked user credits that user with a `Co-authored-by` trailer.
 
 **Signing through a forwarded agent (GH-8, SEC-7).** At session start of a persona with write access, the worker generates an SSH signing key for the session's commit identity, has the server record its fingerprint and a title `cantiere-<session-id>`, and registers it on that account with the identity's user token (`POST /user/ssh_signing_keys`, through the app's user permission for SSH signing keys).
@@ -40,7 +41,7 @@ Reviewer, QA and other read-only personas get no signing key, since they cannot 
 **Push checks (SEC-7).** When the guest pushes the session branch, the git proxy:
 
 1. Rejects anything not on the session branch, and runs the secret scan (ADR-0010).
-2. Rejects the push unless every commit the push adds to the session branch (reachable from the new head, but not from the branch's previous head on GitHub or from the base tip the server recorded when it created the branch) is signed by the session's signing key, has the session's commit identity as author and committer, and, in `bot` mode with a linked user, carries that user's `Co-authored-by` trailer.
+2. Rejects the push unless every commit the push adds to the session branch (reachable from the new head, but not from the branch's previous head or from the base branch's current tip, both read from GitHub at push time) is signed by the session's signing key, has the session's commit identity as author and committer, and, in `bot` mode with a linked user, carries that user's `Co-authored-by` trailer.
 3. Pushes with the installation token in `bot` mode or the user's token in `user` mode.
 
 Every commit a session adds to its branch, and therefore every commit in its PR, is signed; there is no unsigned fallback (SEC-7; the project owner decided this on 2026-10-08).
