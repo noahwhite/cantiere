@@ -32,7 +32,7 @@ Today each agent runs in a long-lived Docker container per CLI (`claude-dev-cont
 ### Success measures
 
 - Run 10 or more concurrent sessions on one host without cross-talk (today: about 3 to 4 terminals).
-- Zero long-lived credentials inside a sandbox: every secret short-lived and scoped to the session (subscription logins excepted until resolved, see COST-3).
+- Zero long-lived credentials inside a sandbox: every secret short-lived and scoped to the session (subscription mode excepted, see COST-3).
 - Every merged Officina PR traceable to a session record (plan, commands, review evidence).
 - Retire the three terminal containers for day-to-day Officina work.
 
@@ -131,7 +131,7 @@ Priorities use MoSCoW: M = must (Phase 1 or 2), S = should (Phase 2 to 4), C = c
 
 | ID | Requirement | Pri |
 | --- | --- | --- |
-| SB-1 | Each session runs in its own sandbox (microVM or gVisor-sandboxed container) booted from a prebuilt snapshot in under 30 s | M |
+| SB-1 | Each session runs in its own microVM sandbox (SEC-1) booted from a prebuilt snapshot in under 30 s | M |
 | SB-2 | Environment is defined as code in the repo (`.agent/blueprint.yaml`): base image, toolchains, repo clones, setup and maintenance commands, services | M |
 | SB-3 | Snapshots rebuild on blueprint change and nightly; a failed build keeps the last good snapshot and alerts | M |
 | SB-4 | Multi-repo sessions: clone several repos (e.g. `officina`, `officina-site`, `linear-config`) with per-repo blueprint layers | M |
@@ -145,9 +145,9 @@ Priorities use MoSCoW: M = must (Phase 1 or 2), S = should (Phase 2 to 4), C = c
 
 | ID | Requirement | Pri |
 | --- | --- | --- |
-| RT-1 | Pluggable runtime adapters run existing CLIs headless inside the sandbox: Claude Code, opencode, Codex CLI; adding a CLI is a config + adapter, not a fork | M |
+| RT-1 | Pluggable runtime adapters run existing CLIs headless inside the sandbox: Claude Code, opencode, Codex CLI; adding a CLI is a config + adapter, not a fork. Phase 1 ships Claude Code; opencode and Codex CLI follow in Phase 2 through an ACP adapter (ADR-0009) | M |
 | RT-2 | Adapters normalize a common event stream (messages, tool calls, file edits, commands, cost) into the session timeline | M |
-| RT-3 | Per-session model and effort choice, with org defaults and a deny list (e.g. never Fable 5) | M |
+| RT-3 | Per-session model and effort choice, with org defaults and a deny list (e.g. never Fable 5), enforced at the model gateway for API-key sessions and only by the runtime adapter in subscription mode (ADR-0014) | M |
 | RT-4 | Skills, agents and memory mount read-only from a versioned source (the `claude-dev-container/skills` repo), synced per runtime's expected layout | M |
 | RT-5 | Memory writes from a session go through a review queue before merging into shared memory | S |
 | RT-6 | Per-session runtime home (`CODEX_HOME`, `~/.claude`) so concurrent sessions never share lock files | M |
@@ -176,7 +176,7 @@ Each deployment registers its own public GitHub App, so it can work on any user'
 | GH-3 | The control plane records every installation (account, installation ID, repos, granted permissions) and acts only on installations and repos an operator approved; webhooks from other installations are dropped and logged | M |
 | GH-4 | PR and issue commands (IN-2) start or steer a session only when the commenter has write access to the repo and is an approved user | M |
 | GH-5 | Session tokens (ID-2) are minted from the installation that owns each target repo, limited to that repo and the persona's declared permissions; reviewer and QA tokens carry no write permissions | M |
-| GH-6 | Users link their GitHub account through the app's user authorization (OAuth); the broker holds the refresh token and the sandbox gets only a short-lived user access token restricted to the session's target repo (GitHub's repository\_id parameter); user tokens cannot be narrowed to the persona's permissions, so any action outside them goes through the broker | M |
+| GH-6 | Users link their GitHub account through the app's user authorization (OAuth); the server keeps the refresh token in the secret store, and short-lived user access tokens are applied only at the worker, never inside the sandbox (ADR-0010); user tokens cannot be narrowed to the persona's permissions, so every use passes the persona's policy check (ADR-0015) and is audited (SEC-5); tokens are requested restricted to the session's target repo (GitHub's repository\_id parameter) where GitHub allows it, as defense in depth only (ADR-0012) | M |
 | GH-7 | Per persona or session, PRs, commits and comments are authored as the app bot (default) or as the linked user; reviewer personas always post as the bot | M |
 | GH-8 | In user-authored mode, commits are signed with a key registered to that user's GitHub account so they show as Verified; otherwise the bot stays committer and the user is credited as co-author (SEC-7) | M |
 | GH-9 | Unlinking revokes the user's token at GitHub and pauses that user's running sessions to the inbox | S |
@@ -225,11 +225,11 @@ Security is the main reason to move off the current containers, so these are all
 
 | ID | Requirement | Pri |
 | --- | --- | --- |
-| SEC-1 | Sandboxes get a VM-grade boundary (Firecracker, Cloud Hypervisor or gVisor); no host Docker socket, no `NET_ADMIN`, no unconfined seccomp | M |
+| SEC-1 | Sandboxes get a VM-grade boundary: a hardware-virtualized microVM such as Firecracker or Cloud Hypervisor; plain containers and userspace kernels such as gVisor do not qualify; no host Docker socket, no `NET_ADMIN`, no unconfined seccomp | M |
 | SEC-2 | Default-deny egress with per-blueprint allowlists by domain, enforced outside the sandbox (proxy), with every denied request logged | M |
 | SEC-3 | Tailscale or WireGuard reach to dev hosts only for personas that declare it, with a per-session ephemeral node and ACL tag | M |
 | SEC-4 | Reviewer and QA sandboxes are read-only for git and production systems by construction, not by prompt | M |
-| SEC-5 | Every privileged action (push, merge, workflow dispatch, Linear status change, cloud mutation) is recorded in an append-only audit log with session, persona, head SHA and actor | M |
+| SEC-5 | Every privileged action the platform executes or forwards (push, merge, workflow dispatch, Linear status change, API calls through the worker proxies, including cloud mutations) is recorded in an append-only audit log with session, persona, head SHA and actor; actions taken with direct credentials or over the tailnet are bounded by credential scope and tailnet ACL instead (ADR-0010, ADR-0011) | M |
 | SEC-6 | Prompt-injection posture: content from tickets, PRs, web pages and comments is tagged untrusted in the timeline; high-impact tools require a policy check that untrusted input cannot satisfy | S |
 | SEC-7 | Signed commits from a per-session or per-persona key held outside the sandbox (signing via agent forwarding or a signing service) | M |
 
@@ -237,10 +237,10 @@ Security is the main reason to move off the current containers, so these are all
 
 | ID | Requirement | Pri |
 | --- | --- | --- |
-| ID-1 | Secrets live in an external store (Bitwarden Secrets Manager / Infisical / Vault); the platform resolves them by reference at session start | M |
-| ID-2 | Credentials are minted per session and short-lived: GitHub App installation tokens scoped to the session's repos, Linear and cloud tokens via broker; nothing long-lived enters the sandbox | M |
+| ID-1 | Secrets live in an external store behind a pluggable interface (OSS-3), resolved by reference at session start; OpenBao is the first implementation and the only one that mints dynamic credentials (ID-2); Bitwarden Secrets Manager is supported for static secrets; Vault or Infisical may follow (ADR-0010) | M |
+| ID-2 | Credentials are minted per session and short-lived: GitHub App installation tokens scoped to the session's repos, Linear and cloud tokens via broker; apart from the subscription-mode token (COST-3), nothing long-lived enters the sandbox, and in practice only credentials with no injectable header enter it at all (ADR-0010) | M |
 | ID-3 | Personas declare required secrets; a session receives only those, never the union | M |
-| ID-4 | Secrets never appear in argv, files, logs or the timeline; output is scrubbed for known secret values and patterns before storage | M |
+| ID-4 | The platform never passes secrets in argv or writes them to files, logs or the timeline; session output (events, terminal recordings, artifacts) is scrubbed for every known secret value, placeholder and token pattern before it leaves the worker; encoded copies made by guest code are not caught, which is why credentials stay outside the sandbox (ADR-0010) | M |
 | ID-5 | Separate bot identities per role where the provider supports it (implementer vs reviewer vs QA), so a reviewer token cannot push | S |
 | ID-6 | OIDC from sandbox to cloud providers instead of static keys where supported | C |
 
@@ -248,9 +248,9 @@ Security is the main reason to move off the current containers, so these are all
 
 | ID | Requirement | Pri |
 | --- | --- | --- |
-| COST-1 | Live spend per session from runtime events (tokens x model price), aggregated per issue, persona and day; for subscription runtimes this is a notional API-equivalent figure, and the provider's usage-limit windows are tracked separately | M |
-| COST-2 | Hard budget caps per session and per day; at the cap the session pauses and posts to the inbox | M |
-| COST-3 | Support subscription-auth runtimes (Claude Code OAuth, Codex login) alongside API keys, with per-session isolated auth homes; these logins keep a refresh credential in that home, an exception to ID-2 until Phase 0 shows the broker can hold it and pass only access tokens to the sandbox | M |
+| COST-1 | Live spend per session (tokens x model price), aggregated per issue, persona and day; API-key sessions are metered at the model gateway outside the sandbox, which is authoritative; subscription sessions use runtime-reported usage, a notional API-equivalent figure, and the provider's usage-limit windows are tracked separately | M |
+| COST-2 | Budget caps per session and per day, hard for API-key sessions: they are capped at the model gateway outside the sandbox, so spend cannot pass the cap except by provider-side usage a response does not report, which is reconciled on the next request; subscription sessions are capped best effort on their notional spend (COST-1) by the runtime adapter (ADR-0014); at the cap the session pauses and posts to the inbox | M |
+| COST-3 | Support subscription-auth runtimes (Claude Code setup-token, ChatGPT sign-in for Codex or opencode) alongside API keys; subscription mode is opt-in and available only when the deployment's single user is both the subscriber and the operator, on infrastructure only they control; multi-user deployments cannot enable it; it places the subscriber's own token in that subscriber's sessions, a permanent exception to ID-2 (ADR-0014) | M |
 | COST-4 | One 16-core / 64 GB host runs 10 concurrent sessions at Officina workload; sandboxes have CPU, memory and disk quotas | M |
 | COST-5 | Add worker hosts by registration; the scheduler places sessions by free capacity | S |
 
@@ -286,13 +286,13 @@ The implementer sandbox is the only one with push rights, and only to its own br
 
 | Component | Reuse candidate | Build |
 | --- | --- | --- |
-| Sandbox runtime | OpenHands runtime, E2B / microsandbox, Firecracker, gVisor | Adapter to the chosen backend |
-| Workspaces and snapshots | Coder (Terraform templates), devcontainer spec | `blueprint.yaml` to image pipeline |
-| Agent runtimes | Claude Code, opencode, Codex CLI headless modes | Runtime adapters + event normalizer (RT-1, RT-2) |
-| Workflow engine | Temporal or a durable-execution library | Officina reference workflow + gate steps |
-| Web UI | OpenHands UI, code-server, xterm.js, noVNC for browser view | Session list, inbox, timeline |
-| Secrets | Bitwarden Secrets Manager (in use), GitHub App tokens | Per-session broker (ID-2, ID-3) |
-| Egress | Squid / Envoy / smokescreen | Allowlist config from blueprints |
+| Sandbox runtime | Firecracker (Cloud Hypervisor fallback) | SandboxProvider adapter, image and snapshot pipeline (ADR-0007, ADR-0008) |
+| Workspaces and snapshots | devcontainer spec as a later import format (ADR-0008); Coder not adopted (ADR-0002) | `blueprint.yaml` to image pipeline |
+| Agent runtimes | Claude Code headless; ACP agents (opencode, codex-acp) | Two runtime adapters + event schema (RT-1, RT-2, ADR-0009) |
+| Workflow engine | DBOS Transact (Java) on Postgres (ADR-0006) | Officina reference workflow + gate steps |
+| Web UI | code-server, xterm.js, noVNC for browser view (ADR-0013) | Session list, inbox, timeline (ADR-0016) |
+| Secrets | OpenBao, Bitwarden Secrets Manager (in use), GitHub App tokens | Per-session broker (ID-2, ID-3) |
+| Egress | None adopted: Envoy's SNI proxy is alpha, smokescreen needs explicit proxy settings (ADR-0011) | Rust egress proxy on the worker, allowlist from blueprints (ADR-0011) |
 | Observability | OpenTelemetry, Grafana Cloud, R2 | Event schema and dashboards |
 
 ## Scope, roadmap and open questions
@@ -319,16 +319,17 @@ Later option: a hosted control plane (UI, workflows, integrations) with customer
 
 ### Phased roadmap (one epic per phase)
 
-1. **Phase 0 - Spike (timebox 1 week):** compare OpenHands runtime, Coder, E2B/microsandbox and plain Firecracker for SB-1, SEC-1, SEC-2; test broker-held subscription credentials (COST-3); run one Claude Code session headless end to end. Exit: sandbox backend chosen, ADR merged.
-2. **Phase 1 - Single-session MVP:** SB-1..6, RT-1..4, RT-6, IN-3, IN-4, GH-1..3, GH-5..8, UX-1..5, SEC-1..5, SEC-7, ID-1..4, KN-1, COST-1..4, OBS-1..3, OSS-1..4, OSS-6. Exit: one Officina story implemented through PR from the web UI with no terminal container.
-3. **Phase 2 - Ticket-driven and orchestrated:** IN-1, IN-2, GH-4, IN-5, UX-6..8, WF-1..7, SEC-6. Exit: assigning an OFF story runs the full reference workflow to a merge-approval request; reviewers run read-only.
+1. **Phase 0 - Spike (timebox 1 week):** compare OpenHands runtime, Coder, E2B/microsandbox and plain Firecracker for SB-1, SEC-1 and the network-level part of SEC-2 (default deny; the proxy domain allowlist is checked in the first Phase 1 slice); verify the subscription-token auth signals (COST-3, architecture test 6a; the broker-held credential question is answered in ADR-0014); run one Claude Code session headless end to end. Exit: sandbox backend chosen, ADR merged.
+2. **Phase 1 - Single-session MVP:** SB-1..6, RT-1 (Claude Code), RT-2..4, RT-6, IN-3, IN-4, GH-1..3, GH-5..8, UX-1..5, SEC-1..5, SEC-7, ID-1..4, KN-1, COST-1..4, OBS-1..3, OSS-1..4, OSS-6. Exit: one Officina story implemented through PR from the web UI with no terminal container.
+3. **Phase 2 - Ticket-driven and orchestrated:** IN-1, IN-2, GH-4, IN-5, RT-1 (opencode, Codex CLI), UX-6..8, WF-1..7, SEC-6. Exit: assigning an OFF story runs the full reference workflow to a merge-approval request; reviewers run read-only.
 4. **Phase 3 - Always-on:** IN-6..8, SB-7, RT-5, KN-2, KN-4, ID-5, GH-9, COST-5, OBS-4. Exit: terminal containers retired; QA and PagerDuty sessions start without a human.
 5. **Phase 4 - Community:** OSS-5, KN-3, SB-8, ID-6, GH-10, GitHub Issues and Jira providers, first external release.
 
 ### Open questions
 
-- [ ] Build on OpenHands' runtime and UI, or a thin new control plane over Coder/Firecracker? Decide in Phase 0.
-- [ ] Do Claude Code and Codex subscription terms allow headless use from a self-hosted multi-session server, or are API keys required? (COST-3)
+- [x] Build on OpenHands' runtime and UI, or a thin new control plane over Coder/Firecracker? Resolved: a thin new control plane that reuses components at defined seams (ADR-0002); Phase 0 still measures OpenHands, Coder, E2B and microsandbox as evidence.
+- [x] Do Claude Code and Codex subscription terms allow headless use from a self-hosted multi-session server, or are API keys required? (COST-3) Resolved in ADR-0014: API keys by default; subscription mode is opt-in for a single-user deployment whose user is both the subscriber and the operator.
+- [x] Project owner sign-off on the residual terms risk of storing the subscriber's Claude setup-token, required before subscription mode ships (ADR-0014). Resolved: the owner accepted it for the first release of subscription mode (2026-10-08); a change to Anthropic's terms or guidance reopens it.
 - [ ] Which host runs it?
 - [x] GitHub App vs fine-grained PATs for per-session tokens, given the `noahwhite` vs officina identity split. Resolved: per-deployment public GitHub App with optional user linking (GH-1..10).
 - [x] Project name and GitHub home (`noahwhite/*` vs a new org) for the open-source repo. Resolved: Cantiere, public at github.com/noahwhite/cantiere (personal account for showcase; transfer to an org later if needed).
