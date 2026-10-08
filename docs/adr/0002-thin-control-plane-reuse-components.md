@@ -28,7 +28,7 @@ Reuse proven components at well-defined seams instead of forking a platform:
 | Durable execution | Library on Postgres (ADR-0006) | Session and workflow definitions |
 | Secrets | External secret store | Broker, injection and policy (ADR-0010) |
 
-Every seam that a user may want to swap (sandbox backend, secret store, issue tracker, chat, object store) is an interface in the component that owns it (a Java interface in the server, a Rust trait in the worker) with one first-party implementation in Phase 1 (OSS-3).
+Every seam that a user may want to swap (sandbox backend, secret store, issue tracker, chat, object store) is an interface in the component that owns it (a Java interface in the server, a Rust trait in the worker) with at least one first-party implementation in Phase 1 (OSS-3); the secret store has two, OpenBao and Bitwarden Secrets Manager (ADR-0010).
 
 ## Consequences
 
