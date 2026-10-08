@@ -113,7 +113,7 @@ sequenceDiagram
     end
     G->>W: git push (session branch)
     W->>W: Policy check, secret scan, signature check
-    W->>X: Verified commits + PR as bot or linked user
+    W->>X: Verified commits (machine user or linked user) + PR (bot or linked user)
     S->>U: Inbox: PR ready
     S->>W: Tear down VM, revoke tokens, flush artifacts
 ```
