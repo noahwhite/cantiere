@@ -27,8 +27,8 @@ This ADR records how that is built on top of ADR-0010, where no GitHub credentia
 2. Pushes the original objects to a short-lived staging branch `cantiere-staging/<session-id>` with the installation token, so every blob and tree already exists on GitHub.
 3. Recreates each commit with the same tree:
    - `bot` mode: one `POST /repos/{owner}/{repo}/git/commits` call per commit with the installation token and no author, committer or signature, so GitHub signs it as the app and shows it Verified ([commit signature verification](https://docs.github.com/en/authentication/managing-commit-signature-verification/about-commit-signature-verification)); a linked user is credited with a `Co-authored-by` trailer;
-   - `user` mode: the worker builds each commit object itself (with `gix`), with the user as author and committer and a `gpgsig` SSH signature computed with the user's SSH signing key (`ssh-key`), and pushes the objects over git with the user's token. GitHub verifies SSH commit signatures from git pushes; its commits API documents its `signature` field as PGP only, so that API is not used here. The key is generated at link time, stored in the secret store, and registered on the user's account through the app's user permission for SSH signing keys. The worker signs only commit objects it is itself creating for this push.
-4. Moves the session branch to the recreated head, deletes the staging branch, and returns the new SHAs.
+   - `user` mode: the worker builds each commit object itself (with `gix`), with the user as author and committer and a `gpgsig` SSH signature computed with the user's SSH signing key (`ssh-key`), and pushes them over git to the session branch with the user's token. GitHub verifies SSH commit signatures from git pushes; its commits API documents its `signature` field as PGP only, so that API is not used here. The key is generated at link time, stored in the secret store, and registered on the user's account through the app's user permission for SSH signing keys. The worker signs only commit objects it is itself creating for this push.
+4. Moves the session branch to the recreated head (in `user` mode, the step 3 push already did), deletes the staging branch, and returns the new SHAs.
 
 In `bot` mode this costs one API call per commit, independent of the number of files, which stays well inside GitHub's content-creation rate limits.
 The guest performs pushes through its own `git push` wrapper, which holds the repository lock for the push. After a successful push it rebases any commits made in the meantime onto the recreated head; the trees are identical, so the rebase cannot conflict.
@@ -41,14 +41,13 @@ The guest performs pushes through its own `git push` wrapper, which holds the re
 
 Every commit on a session branch, and therefore in any PR, is signed; there is no unsigned fallback (SEC-7; the project owner decided this on 2026-10-08).
 The only unsigned commits that reach GitHub are the originals on the `cantiere-staging/<session-id>` branch from step 2, which exists only to upload objects, is never opened as a PR and is deleted in step 4.
-If a push fails after step 2, the worker deletes the staging branch before returning the error.
-In case the worker crashes instead, the server durably records each staging branch, with a timestamp from the server's clock, before every push to it (a later push in the same session refreshes the record), so a crash between the two leaves a record with no branch, never a branch with no record.
-The git proxy starts steps 2 to 4 only after the server, reading its own clock, confirms the record is less than 30 minutes old.
-On its monotonic clock, the proxy discards a confirmation it has not used within one minute of sending the request, and aborts steps 2 to 4 if the session branch has not moved within 30 minutes of starting.
-Before reporting an abort or error, the proxy reads the session branch: if it already points at the recreated head, the push has succeeded and the proxy returns the new SHAs, even if deleting the staging branch failed, leaving that branch to the sweep.
-Only the step 2 upload needs the staging ref; once step 2 completes, the objects are on GitHub, so a sweep during steps 3 or 4, or during a move still in flight after an abort, cannot change the outcome.
-Every hour, the server deletes each `cantiere-staging/*` branch whose record is more than 90 minutes old; this leaves 30 minutes of margin after the latest a push can end, and does not rely on worker state.
-A push stalled past these bounds may lose its staging branch to the sweep before the session branch moves; it then fails with the session branch unchanged, so the guest retries from the same head.
+The session branch moves only as a fast-forward from the head the guest last pushed (a ref update with `force` false in `bot` mode, a plain git push in `user` mode), so a stale or repeated move is rejected and never overwrites.
+A failure before the move leaves the session branch unchanged, and the guest retries from the same head.
+If the move's outcome is unknown, for example after an abort or a lost response, the retry's move is rejected because the branch has already advanced; the proxy then reads the branch and, if the commits it added since the guest's base carry the guest's trees in order, returns their SHAs as the result.
+The worker deletes the staging branch at the end of every push, successful or not.
+In case the worker crashes instead, the server durably records each staging branch before every push to it (a later push in the same session refreshes the record), so a crash leaves a record with no branch, never a branch with no record.
+The git proxy aborts a push still running after 30 minutes, and every hour the server deletes each `cantiere-staging/*` branch whose record is more than 90 minutes old, without relying on worker state.
+If the sweep removes the staging branch of a push still running, that push fails before the move or is settled as above, so correctness never depends on these timings.
 After the sweep no unsigned commit stays on any branch, though GitHub may keep the uploaded objects unreferenced until its own garbage collection.
 If check 1 fails, the git proxy refuses bot-mode pushes, and Phase 1 does not exit until bot commits pass check 1, because `bot` is the default mode (GH-7) and test 11 requires Verified bot commits.
 Each refused push is written to the audit log (ADR-0015).
