@@ -46,11 +46,14 @@ Reviewer, QA and other read-only personas get no signing key, since they cannot 
 3. The server deletes the signing keys whose fingerprints it recorded for the identity (per-session keys, or under the check 3 fallback its long-lived key, also removed from the secret store), never the account's own keys. It retries failed deletions for a bounded time, then goes on to step 4 and lists any key it could not delete for the user to delete in their GitHub settings, so a failing deletion never delays revocation.
 4. The server revokes the app's authorization for the account (`DELETE /applications/{client_id}/grant`, with an access token the workflow refreshed), which invalidates the refresh token and every access token already handed to a worker, so steps 3 and 4 never wait for step 2 to be confirmed. Step 3 runs first because deleting a key needs the identity's token. The workflow then deletes the stored refresh token and removes the link.
 
-The inbox item offers to end the session or, once the same GitHub account (matched by its account ID) is linked again, to resume it; linking a different account offers only ending it, so paused work is never credited to another account.
-A `bot`-mode session that only credited the user keeps the machine user's key and needs no re-signing; it can resume at once without the trailer, or after re-linking with it.
-A session whose own key step 3 deleted (a `user`-mode session of the user, or any session that commits as an unlinked machine user) gets a new session key from the worker on resume.
-Its commits made before the pause and not yet pushed are signed with the deleted key, so before the runtime continues the adapter re-signs them in the guest: in topological order over the commits push check 2 would count, it recreates each with `git commit-tree -S`, keeping its tree, message and author name and date, mapping its parents to their re-signed copies, and setting author and committer email to the identity's current chosen address (which may differ after re-linking), so push check 2 accepts them.
-It then moves the branch to the new head and tells the runtime their SHAs changed.
+The inbox item offers to end the session or to resume it as below, which for a session that commits as the unlinked identity needs the same GitHub account (matched by its account ID) linked again; linking a different account offers only ending it, so paused work is never credited to another account.
+What resume does depends on the session's commit identity, not its authoring mode:
+
+- A session that commits as the unlinked identity (a `user`-mode session whose commits are the user's own, or any session that commits as an unlinked machine user) had its key deleted in step 3, so on resume the worker registers a new session key, and its unpushed commits are recreated (below) to be signed with it and to carry the identity's current chosen address, which may differ after re-linking, as author and committer email.
+- A session that commits as the machine user and only credits the user (`bot` mode, or `user` mode under the check 2 or address fallbacks) keeps the machine user's key. It can resume at once without the trailer. After re-linking it adds the trailer again, and if any unpushed commit lacks it (made while unlinked) or names an address the user no longer chose, its unpushed commits are recreated (below) so each carries the trailer with the current address, as push check 2 requires.
+
+Recreation runs in the guest before the runtime continues: in topological order over the commits push check 2 would count, the adapter recreates each with `git commit-tree -S`, keeping its tree and author name and date, changing only the address or trailer above, and mapping its parents to their recreated copies.
+It then moves the branch to the new head and tells the runtime the SHAs changed.
 Unlike a rebase, this reapplies no changes, so every tree, merge included, and every commit is kept exactly.
 Nothing already pushed is touched.
 
@@ -78,6 +81,6 @@ If check 3 fails, each identity gets one long-lived signing key instead, generat
 
 - No GitHub credential or signing key ever enters a sandbox; the guest holds only the agent socket.
 - Git works as in a terminal: commits are signed when made, SHAs do not change at push, and there is no staging branch or commit recreation at push.
-- Unlinking pauses every session that uses the identity; resuming one whose key was deleted re-signs its unpushed commits, the only case where Cantiere changes a local commit's SHA.
+- Unlinking pauses every session that uses the identity; resuming one may recreate its unpushed commits (a new key or address), the only case where Cantiere changes a local commit's SHA.
 - `bot`-mode commits show the deployment's machine user, not the app, as author and committer.
 - The SSH agent is a signing oracle for the session's lifetime: code in the sandbox can get commits signed that the proxy never sees. Such a commit verifies only as the session's identity, and only if pushed to GitHub before the key is deleted at session end (check 3). Egress goes only through the worker's proxies (ADR-0007), and every signature is audited, so signatures that match no pushed commit, which ordinary amends and local rebases also leave, can be reviewed.
