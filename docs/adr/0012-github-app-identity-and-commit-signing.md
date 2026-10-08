@@ -45,7 +45,8 @@ If a push fails after step 2, the worker deletes the staging branch before retur
 In case the worker crashes instead, the server durably records each staging branch, with a timestamp from the server's clock, before every push to it (a later push in the same session refreshes the record), so a crash between the two leaves a record with no branch, never a branch with no record.
 The git proxy starts steps 2 to 4 only after the server, reading its own clock, confirms the record is less than 30 minutes old.
 On its monotonic clock, the proxy discards a confirmation it has not used within one minute of sending the request, and aborts steps 2 to 4 if the session branch has not moved within 30 minutes of starting.
-Once the session branch has moved, the push has succeeded: the proxy returns the new SHAs even if deleting the staging branch fails, and leaves that branch to the sweep.
+Before reporting an abort or error, the proxy reads the session branch: if it already points at the recreated head, the push has succeeded and the proxy returns the new SHAs, even if deleting the staging branch failed, leaving that branch to the sweep.
+Only the step 2 upload needs the staging ref; once step 2 completes, the objects are on GitHub, so a sweep during steps 3 or 4, or during a move still in flight after an abort, cannot change the outcome.
 Every hour, the server deletes each `cantiere-staging/*` branch whose record is more than 90 minutes old; this leaves 30 minutes of margin after the latest a push can end, and does not rely on worker state.
 A push stalled past these bounds may lose its staging branch to the sweep before the session branch moves; it then fails with the session branch unchanged, so the guest retries from the same head.
 After the sweep no unsigned commit stays on any branch, though GitHub may keep the uploaded objects unreferenced until its own garbage collection.
