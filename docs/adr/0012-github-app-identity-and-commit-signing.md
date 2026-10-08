@@ -27,6 +27,7 @@ PRs and comments in `bot` mode still come from the app.
 In `user` mode, commits come from the linked user.
 Either identity commits with an email address GitHub has verified on its account: when the identity is linked, the server lists them through the app's read-only user permission for email addresses (`GET /user/emails`), the user picks one (the account's no-reply address if GitHub lists it), and the choice is stored with the link.
 If the account blocks pushes that expose a private address, GitHub rejects the push, and the timeline says to pick another address.
+The server rechecks that the stored address is still verified on the account at session start and before each push: at session start a failed check runs a `user`-mode session with machine-user commits and the user as co-author (GH-8), and before a push it makes the proxy refuse the push, with the timeline saying why, so a commit with an unverified address is never published.
 Whether GitHub shows a signed commit as Verified depends on the account (its address and its registered keys), so the proxy guarantees the signature and identity, and after each push it reads the head commit's verification through the commits API and reports any other result, such as `no_user` or `unverified_email`, in the timeline and the audit log.
 A `bot`-mode session with a linked user credits that user with a `Co-authored-by` trailer.
 
