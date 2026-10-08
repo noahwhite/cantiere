@@ -48,7 +48,7 @@ On its monotonic clock, the proxy discards a confirmation it has not used within
 Once the session branch has moved, the push has succeeded: the proxy returns the new SHAs even if deleting the staging branch fails, and leaves that branch to the sweep.
 Every hour, the server deletes each `cantiere-staging/*` branch whose record is more than 90 minutes old; this leaves 30 minutes of margin after the latest a push can end, and does not rely on worker state.
 A push stalled past these bounds may lose its staging branch to the sweep before the session branch moves; it then fails with the session branch unchanged, so the guest retries from the same head.
-No unsigned commit stays on any branch, though GitHub may keep the uploaded objects unreferenced until its own garbage collection.
+After the sweep no unsigned commit stays on any branch, though GitHub may keep the uploaded objects unreferenced until its own garbage collection.
 If check 1 fails, the git proxy refuses bot-mode pushes, and Phase 1 does not exit until bot commits pass check 1, because `bot` is the default mode (GH-7) and test 11 requires Verified bot commits.
 Each refused push is written to the audit log (ADR-0015).
 If check 2 fails, `user` mode falls back to bot commits with the user as co-author, as GH-8 already allows.
