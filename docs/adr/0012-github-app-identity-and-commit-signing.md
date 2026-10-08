@@ -39,8 +39,10 @@ The guest performs pushes through its own `git push` wrapper, which holds the re
 2. The app can register a user SSH signing key with a user token, and worker-built commits signed with that key and pushed over git show Verified as the user, with the original tree.
 3. Pushes to `cantiere-staging/*` are allowed by the target repo's rulesets, and staging branches do not trigger CI (the reference workflow ignores the prefix).
 
-If check 1 fails, `bot` mode falls back to plain pushes of unsigned bot commits, with a repository ruleset that does not require signatures for the app. That is a deviation from SEC-7: it needs the project owner's approval, is off until a deployment operator enables it, and every unsigned push is written to the audit log (ADR-0015).
+Every pushed commit is signed; there is no unsigned fallback (SEC-7; the project owner decided this on 2026-10-08).
+If check 1 fails, `bot` mode does not ship, and the git proxy refuses bot-mode pushes until a signed path passes check 1.
 If check 2 fails, `user` mode falls back to bot commits with the user as co-author, as GH-8 already allows.
+If both fail, sessions cannot push, and Phase 1 does not exit until one signed path works.
 
 ## Consequences
 
