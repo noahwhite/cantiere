@@ -1,6 +1,6 @@
 # ADR-0012: Per-deployment GitHub App, optional user linking, and Verified commits without keys in the sandbox
 
-- Status: Proposed - accept when the validation checks below pass (Phase 1, slice 1; they need the git proxy)
+- Status: Proposed - accept when validation checks 1 and 3 below pass, with check 2 passing or its fallback in use (Phase 1, slice 1; they need the git proxy)
 - Date: 2026-10-07
 - Requirements: GH-1, GH-2, GH-3, GH-5, GH-6, GH-7, GH-8, SEC-5, SEC-7
 
@@ -41,7 +41,9 @@ The guest performs pushes through its own `git push` wrapper, which holds the re
 
 Every commit on a session branch, and therefore in any PR, is signed; there is no unsigned fallback (SEC-7; the project owner decided this on 2026-10-08).
 The only unsigned commits that reach GitHub are the originals on the `cantiere-staging/<session-id>` branch from step 2, which exists only to upload objects, is never opened as a PR and is deleted in step 4.
+If a push fails after step 2, the worker deletes the staging branch before returning the error, and the server's hourly sweep deletes any `cantiere-staging/*` branch whose session has no push in progress.
 If check 1 fails, the git proxy refuses bot-mode pushes, and Phase 1 does not exit until bot commits pass check 1, because `bot` is the default mode (GH-7) and test 11 requires Verified bot commits.
+Each refused push is written to the audit log (ADR-0015).
 If check 2 fails, `user` mode falls back to bot commits with the user as co-author, as GH-8 already allows.
 
 ## Consequences
