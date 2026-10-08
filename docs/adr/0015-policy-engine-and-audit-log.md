@@ -9,7 +9,7 @@
 Because credentials stay outside the sandbox (ADR-0010), privileged actions (push, PR open or merge, workflow dispatch, Linear status change, API calls through the worker's proxies, including cloud mutations) are executed or forwarded by the worker or server on the session's behalf.
 That gives one enforcement point; it needs one place where the rules live and one record of what happened.
 Three paths bypass it: a direct credential minted into the guest and the per-session SSH agent (both ADR-0010), and tailnet traffic (ADR-0011).
-Actions on those paths are neither decided nor audited here; they are bounded by the credential's scope and lifetime and by the tailnet ACL, and persona validation limits which scopes and tags a persona may declare.
+Actions on those paths are not decided here, and only the SSH agent's commit signatures are audited (ADR-0012); they are bounded by the credential's scope and lifetime and by the tailnet ACL, and persona validation limits which scopes and tags a persona may declare.
 
 ## Decision
 
