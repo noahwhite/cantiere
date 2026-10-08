@@ -35,7 +35,7 @@ Record the same measurements for the OpenHands runtime, Coder, the E2B runtime a
 1. Template restore to guest-agent-ready under 2 s p50 and 30 s p99 on the target host, from a snapshot with Docker warmed.
 2. Officina's `officina` and `officina-site` test suites, including Testcontainers and Playwright, pass inside one guest.
 3. 10 concurrent sessions running those suites on a 16-core / 64 GB host without OOM, with per-session CPU and memory caps holding.
-4. From root inside a guest, attempts to reach the host, other guests, the metadata network, or non-allowlisted egress all fail and are logged, with ADR-0011's host nftables rules in place; the proxy's domain allowlist is tested in Phase 1 (architecture test 8).
+4. From root inside a guest, attempts to reach the host, other guests or the metadata network, or to send anything other than DNS and TCP 80 and 443 to the worker, all fail and are logged, with ADR-0011's host nftables rules in place; the proxy's domain allowlist is tested in Phase 1 (architecture test 8).
 5. Restored clones get unique entropy, machine IDs and network identity (VMGenID / VMClock handling verified).
 6. The `fctools` crate drives create, snapshot, restore, balloon and jailer launch for items 1 to 5 at the pinned Firecracker version; otherwise the worker uses a client generated from `firecracker.yaml` and this item records why.
 
