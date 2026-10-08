@@ -2,7 +2,7 @@
 
 - Status: Proposed - accept when validation check 1 below passes, with checks 2 and 3 passing or their fallbacks in use (Phase 1, slice 1; they need the git proxy)
 - Date: 2026-10-07
-- Requirements: GH-1, GH-2, GH-3, GH-5, GH-6, GH-7, GH-8, GH-9, SEC-5, SEC-7
+- Requirements: GH-1, GH-2, GH-3, GH-5, GH-6, GH-7, GH-8, GH-9, SEC-5, SEC-7, UX-6
 
 ## Context
 
@@ -38,12 +38,23 @@ The SSH agent signs with this key only requests in git's `git` signature namespa
 At session end the SSH agent dies, and the worker deletes the key from GitHub and discards it.
 The server also lists each commit identity's signing keys (`GET /user/ssh_signing_keys`) and deletes every key whose fingerprint it recorded for a session that has ended, so a worker that crashed before or after registering a key cannot leave it registered.
 Reviewer, QA and other read-only personas get no signing key, since they cannot push.
-Unlinking an identity (GH-9) first deletes the signing keys whose fingerprints the server recorded for it (per-session keys, or under the check 3 fallback its long-lived key, also removed from the secret store), never the account's own keys, then revokes its token.
+
+**Unlinking (GH-9).** Unlinking an identity, which its user or the operator can do, is a durable workflow (ADR-0006):
+
+1. The server stops refreshing the identity's token, and a new session that needs the link waits in the inbox until it is linked again (for the machine user, the operator is alerted).
+2. The server sends a pause message to every running session that uses the link: `user`-mode sessions of that user, `bot`-mode sessions that credit that user as co-author, and, for the machine user, every session that commits as it. Each session workflow interrupts the current turn and holds its input queue, as for take-over (ADR-0013); the worker drops the identity's access token from its proxies and its signing key, if the session holds one, from the SSH agent; and the session waits in the inbox with the reason (UX-6). A session whose worker is unreachable pauses when the worker reconnects, since the message is durable.
+3. The server deletes the signing keys whose fingerprints it recorded for the identity (per-session keys, or under the check 3 fallback its long-lived key, also removed from the secret store), never the account's own keys.
+4. The server revokes the app's authorization for the account (`DELETE /applications/{client_id}/grant`), which invalidates the refresh token and every access token already handed to a worker, so steps 3 and 4 never wait for step 2 to be confirmed. Step 3 runs first because deleting a key needs the identity's token.
+
+The inbox item offers to end the session or, once the identity is linked again, to resume it; a `bot`-mode session that only credited the user can also resume at once without the trailer.
+On resume after re-linking, the worker registers a new session key.
+Commits made before the pause and not yet pushed are signed with a key GitHub no longer holds, so before the runtime continues the adapter re-signs them in the guest (`git rebase --force-rebase --rebase-merges --gpg-sign` over the commits push check 2 would count) and tells the runtime their SHAs changed.
+Nothing already pushed is touched.
 
 **Push checks (SEC-7).** When the guest pushes the session branch, the git proxy:
 
 1. Rejects anything not on the session branch, and runs the secret scan (ADR-0010).
-2. Rejects the push unless every commit the push adds to the session branch (reachable from the new head, but not from the branch's previous head or from the base branch's current tip, both read from GitHub at push time) is signed by a key the server recorded for this session (a worker restart that generates a new key keeps the earlier ones valid until session end) or, under the check 3 fallback, by the identity's long-lived key, has the session's commit identity as author and committer, and, in `bot` mode with a linked user, carries that user's `Co-authored-by` trailer.
+2. Rejects the push unless every commit the push adds to the session branch (reachable from the new head, but not from the branch's previous head or from the base branch's current tip, both read from GitHub at push time) is signed by a key the server recorded for this session and has not deleted (a worker restart that generates a new key keeps the earlier ones valid until session end) or, under the check 3 fallback, by the identity's long-lived key, has the session's commit identity as author and committer, and, in `bot` mode with a linked user, carries that user's `Co-authored-by` trailer.
 3. Pushes with the installation token in `bot` mode or the user's token in `user` mode.
 
 Every commit a session adds to its branch is signed; commits that others push to the branch, for example a human PR branch the session is steering (GH-4), are outside the guarantee, like base history below; there is no unsigned fallback (SEC-7; the project owner decided this on 2026-10-08).
@@ -64,5 +75,6 @@ If check 3 fails, each identity gets one long-lived signing key instead, generat
 
 - No GitHub credential or signing key ever enters a sandbox; the guest holds only the agent socket.
 - Git works as in a terminal: commits are signed when made, SHAs do not change at push, and there is no staging branch or commit recreation.
+- Unlinking pauses every session that uses the identity; resuming one after re-linking re-signs its unpushed commits, the only case where Cantiere changes a local commit's SHA.
 - `bot`-mode commits show the deployment's machine user, not the app, as author and committer.
 - The SSH agent is a signing oracle for the session's lifetime: code in the sandbox can get commits signed that the proxy never sees. Such a commit verifies only as the session's identity, and only if pushed to GitHub before the key is deleted at session end (check 3). Egress goes only through the worker's proxies (ADR-0007), and every signature is audited, so signatures that match no pushed commit, which ordinary amends and local rebases also leave, can be reviewed.
