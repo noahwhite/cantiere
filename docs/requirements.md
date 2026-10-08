@@ -329,7 +329,7 @@ Later option: a hosted control plane (UI, workflows, integrations) with customer
 
 - [x] Build on OpenHands' runtime and UI, or a thin new control plane over Coder/Firecracker? Resolved: a thin new control plane that reuses components at defined seams (ADR-0002); Phase 0 still measures OpenHands, Coder, E2B and microsandbox as evidence.
 - [x] Do Claude Code and Codex subscription terms allow headless use from a self-hosted multi-session server, or are API keys required? (COST-3) Resolved in ADR-0014: API keys by default; subscription mode is opt-in for a single-user deployment whose user is both the subscriber and the operator.
-- [x] Project owner sign-off on the residual terms risk of storing the subscriber's Claude setup-token, required before subscription mode ships (ADR-0014). Resolved: the owner accepted it for the first release of subscription mode (2026-10-08).
+- [x] Project owner sign-off on the residual terms risk of storing the subscriber's Claude setup-token, required before subscription mode ships (ADR-0014). Resolved: the owner accepted it for the first release of subscription mode (2026-10-08); a change to Anthropic's terms or guidance reopens it.
 - [ ] Which host runs it?
 - [x] GitHub App vs fine-grained PATs for per-session tokens, given the `noahwhite` vs officina identity split. Resolved: per-deployment public GitHub App with optional user linking (GH-1..10).
 - [x] Project name and GitHub home (`noahwhite/*` vs a new org) for the open-source repo. Resolved: Cantiere, public at github.com/noahwhite/cantiere (personal account for showcase; transfer to an org later if needed).
