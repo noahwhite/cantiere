@@ -38,7 +38,7 @@ The SSH agent signs with this key only requests in git's `git` signature namespa
 At session end the SSH agent dies, and the worker deletes the key from GitHub and discards it.
 The server also lists each commit identity's signing keys (`GET /user/ssh_signing_keys`) and deletes every key titled `cantiere-<session-id>` whose session has ended, so a worker that crashed before or after registering a key cannot leave it registered.
 Reviewer, QA and other read-only personas get no signing key, since they cannot push.
-Unlinking an identity (GH-9) first deletes its signing keys from GitHub, and under the check 3 fallback from the secret store, then revokes its token.
+Unlinking an identity (GH-9) first deletes the signing keys Cantiere registered on it (those titled `cantiere-<session-id>`, or under the check 3 fallback its recorded long-lived key, also removed from the secret store), never the account's own keys, then revokes its token.
 
 **Push checks (SEC-7).** When the guest pushes the session branch, the git proxy:
 
