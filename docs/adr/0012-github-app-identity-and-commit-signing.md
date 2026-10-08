@@ -21,30 +21,33 @@ This ADR records how that is built on top of ADR-0010, where no GitHub credentia
 
 **Authoring mode (GH-7).** Per persona and per session: `bot` (default) or `user`. Reviewer personas are always `bot`. PRs and comments use the matching token; commits use the matching commit identity below.
 
-**Commit identity (GH-7, GH-8).** A GitHub App cannot hold a signing key, so `bot`-mode commits come from a machine user the deployment owns: the setup wizard asks the operator to create one, with a verified email, and to link it like any user (GH-6).
+**Commit identity (GH-7, GH-8).** A GitHub App cannot hold a signing key, so `bot`-mode commits come from a machine user the deployment owns: the setup wizard asks the operator to create one and to link it like any user (GH-6).
 It needs no access to any repo, because GitHub verifies a signature against the committer's account, not repo membership.
 PRs and comments in `bot` mode still come from the app.
 In `user` mode, commits come from the linked user.
+Either identity commits with its account's GitHub no-reply address (`<id>+<login>@users.noreply.github.com`), which GitHub ties to the account, so verification does not depend on which emails a user has made public or verified, and the app needs no email permission.
 A `bot`-mode session with a linked user credits that user with a `Co-authored-by` trailer.
 
-**Signing through a forwarded agent (GH-8, SEC-7).** At session start the worker generates an SSH signing key for the session's commit identity, records it, and registers it on that account with the identity's user token (`POST /user/ssh_signing_keys`, through the app's user permission for SSH signing keys).
+**Signing through a forwarded agent (GH-8, SEC-7).** At session start of a persona with write access, the worker generates an SSH signing key for the session's commit identity, has the server record its fingerprint and a title `cantiere-<session-id>`, and registers it on that account with the identity's user token (`POST /user/ssh_signing_keys`, through the app's user permission for SSH signing keys).
 The private key stays in the worker; the guest reaches it through the session's SSH agent socket (ADR-0010), and its git config sets the identity's name and email, `gpg.format=ssh`, `user.signingkey` to the public key, and `commit.gpgsign=true`.
 The coding agent commits with plain `git commit`, which signs through the SSH agent, so commits are signed when they are made and their SHAs never change.
 The SSH agent signs with this key only requests in git's `git` signature namespace and writes the hash of each signed payload to the audit log (ADR-0015); it never uses the SSH-to-hosts key for such requests.
-At session end the SSH agent dies, and the worker deletes the key from GitHub and discards it; the server deletes any recorded key of an ended session that the worker did not, so a crashed worker cannot leave one registered.
+At session end the SSH agent dies, and the worker deletes the key from GitHub and discards it.
+The server also lists each commit identity's signing keys (`GET /user/ssh_signing_keys`) and deletes every key titled `cantiere-<session-id>` whose session has ended, so a worker that crashed before or after registering a key cannot leave it registered.
+Reviewer, QA and other read-only personas get no signing key, since they cannot push.
 
 **Push checks (SEC-7).** When the guest pushes the session branch, the git proxy:
 
 1. Rejects anything not on the session branch, and runs the secret scan (ADR-0010).
-2. Rejects the push unless every commit not already on GitHub is signed by the session's signing key, has the session's commit identity as author and committer, and, in `bot` mode with a linked user, carries that user's `Co-authored-by` trailer.
+2. Rejects the push unless every commit the push adds to the session branch (reachable from the new head, but not from the branch's previous head or from the base branch it was created from) is signed by the session's signing key, has the session's commit identity as author and committer, and, in `bot` mode with a linked user, carries that user's `Co-authored-by` trailer.
 3. Pushes with the installation token in `bot` mode or the user's token in `user` mode.
 
-Every commit on a session branch, and therefore in any PR, is signed; there is no unsigned fallback (SEC-7; the project owner decided this on 2026-10-08).
+Every commit a session adds to its branch, and therefore every commit in its PR, is signed; there is no unsigned fallback (SEC-7; the project owner decided this on 2026-10-08).
 Each refused push is written to the audit log (ADR-0015).
 
 ## Validation checks
 
-1. A per-session key registered on the machine user signs guest commits through the agent, and the pushed commits show Verified as the machine user.
+1. A per-session key registered on the machine user signs guest commits through the agent, and the pushed commits, with the machine user's no-reply address as committer, show Verified as the machine user.
 2. The same holds in `user` mode, with the key registered through the linked user's token, and the commits show Verified as the user.
 3. Commits pushed while a session key was registered stay Verified after the key is deleted from GitHub (GitHub records verification at push time and keeps it when keys are [rotated or revoked](https://docs.github.com/en/authentication/managing-commit-signature-verification/about-commit-signature-verification); deletion is not documented).
 
