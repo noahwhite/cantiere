@@ -2,7 +2,7 @@
 
 - Status: Proposed - accept when validation check 1 below passes, with checks 2 and 3 passing or their fallbacks in use (Phase 1, slice 1; they need the git proxy)
 - Date: 2026-10-07
-- Requirements: GH-1, GH-2, GH-3, GH-5, GH-6, GH-7, GH-8, SEC-5, SEC-7
+- Requirements: GH-1, GH-2, GH-3, GH-5, GH-6, GH-7, GH-8, GH-9, SEC-5, SEC-7
 
 ## Context
 
@@ -31,7 +31,7 @@ The server rechecks that the stored address is still verified on the account at 
 Whether GitHub shows a signed commit as Verified depends on the account (its address and its registered keys), so the proxy guarantees the signature and identity, and after each push it reads the head commit's verification through the commits API and reports any other result, such as `no_user` or `unverified_email`, in the timeline and the audit log.
 A `bot`-mode session with a linked user credits that user with a `Co-authored-by` trailer.
 
-**Signing through a forwarded agent (GH-8, SEC-7).** At session start of a persona with write access, the worker generates an SSH signing key for the session's commit identity, has the server record its fingerprint and a title `cantiere-<session-id>`, and registers it on that account with the identity's user token (`POST /user/ssh_signing_keys`, through the app's user permission for SSH signing keys).
+**Signing through a forwarded agent (GH-8, SEC-7).** At session start of a persona with write access, the worker generates an SSH signing key for the session's commit identity, has the server record its fingerprint, and registers it on that account under the title `cantiere-<session-id>` (a label only; keys are always matched by fingerprint) with the identity's user token (`POST /user/ssh_signing_keys`, through the app's user permission for SSH signing keys).
 The private key stays in the worker; the guest reaches it through the session's SSH agent socket (ADR-0010), and its git config sets the identity's name and email, `gpg.format=ssh`, `user.signingkey` to the public key, and `commit.gpgsign=true`.
 The coding agent commits with plain `git commit`, which signs through the SSH agent, so commits are signed when they are made and their SHAs never change.
 The SSH agent signs with this key only requests in git's `git` signature namespace and writes the hash of each signed payload to the audit log (ADR-0015); it never uses the SSH-to-hosts key for such requests.
