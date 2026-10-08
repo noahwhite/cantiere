@@ -175,7 +175,7 @@ Each item's pass condition is written in its ADR.
 | 8 | Phase 1, slice 1 | CA, proxy trust and domain allowlist | Claude Code, `git`, `gh`, Docker pulls, Maven and npm work through the proxy with the per-session CA; non-allowlisted domains are denied and every denial is logged | 0010, 0011 |
 | 9 | Phase 1, slice 1 | Model gateway | Claude Code runs end to end against the gateway with a placeholder key; usage metered and priced from the config-repo price table | 0014 |
 | 10 | Phase 1, slice 1 | GitHub API policy | Session token cannot update refs, merge, or mutate other repos via REST or GraphQL | 0010 |
-| 11 | Phase 1, slice 1 | Push-time signing | Recreated bot and user commits show Verified and keep trees | 0012 |
+| 11 | Phase 1, slice 1 | Push-time signing | Recreated bot commits show Verified and keep trees; user commits show Verified as the user, or, if ADR-0012 check 2 fails, user mode falls back to Verified bot commits with the user as co-author (GH-8) | 0012 |
 | 12 | Phase 1, slice 1 | Durable step atomicity | A DBOS step that writes a row through the jOOQ step factory and is killed before returning leaves both the row and the checkpoint, or neither | 0006 |
 | 13 | Phase 1, slice 1 | OpenBao dynamic credentials | A PostgreSQL role and a MySQL user issued with a TTL equal to the session maximum stop working, and their open connections are closed, at session end by server revocation and at expiry with the server stopped, including for a guest that reconnects in a loop during revocation; SSH through the worker agent works during the session and fails after it ends, even with the certificate copied out of the guest | 0010 |
 
