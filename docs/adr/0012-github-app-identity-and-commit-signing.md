@@ -36,9 +36,9 @@ The private key stays in the worker; the guest reaches it through the session's 
 The coding agent commits with plain `git commit`, which signs through the SSH agent, so commits are signed when they are made and their SHAs never change.
 The SSH agent signs with this key only requests in git's `git` signature namespace and writes the hash of each signed payload to the audit log (ADR-0015); it never uses the SSH-to-hosts key for such requests.
 At session end the SSH agent dies, and the worker deletes the key from GitHub and discards it.
-The server also lists each commit identity's signing keys (`GET /user/ssh_signing_keys`) and deletes every key titled `cantiere-<session-id>` whose session has ended, so a worker that crashed before or after registering a key cannot leave it registered.
+The server also lists each commit identity's signing keys (`GET /user/ssh_signing_keys`) and deletes every key whose fingerprint it recorded for a session that has ended, so a worker that crashed before or after registering a key cannot leave it registered.
 Reviewer, QA and other read-only personas get no signing key, since they cannot push.
-Unlinking an identity (GH-9) first deletes the signing keys Cantiere registered on it (those titled `cantiere-<session-id>`, or under the check 3 fallback its recorded long-lived key, also removed from the secret store), never the account's own keys, then revokes its token.
+Unlinking an identity (GH-9) first deletes the signing keys whose fingerprints the server recorded for it (per-session keys, or under the check 3 fallback its long-lived key, also removed from the secret store), never the account's own keys, then revokes its token.
 
 **Push checks (SEC-7).** When the guest pushes the session branch, the git proxy:
 
