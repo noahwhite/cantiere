@@ -25,8 +25,8 @@ This ADR records how that is built on top of ADR-0010, where no GitHub credentia
 It needs no access to any repo, because GitHub verifies a signature against the committer's account, not repo membership.
 PRs and comments in `bot` mode still come from the app.
 In `user` mode, commits come from the linked user.
-Either identity commits with its account's ID-based GitHub no-reply address (`<id>+<login>@users.noreply.github.com`), which GitHub ties to the account, so verification does not depend on which emails a user has made public or verified, and the app needs no email permission.
-Some accounts created before July 2017 still use `<login>@users.noreply.github.com` until their email privacy setting is changed ([email addresses reference](https://docs.github.com/en/account-and-profile/reference/email-addresses-reference)), so linking asks such users to turn email privacy off and on once.
+Either identity commits with an email address GitHub has verified on its account: when the identity is linked, the server lists them through the app's read-only user permission for email addresses (`GET /user/emails`), the user picks one (the account's no-reply address if GitHub lists it), and the choice is stored with the link.
+If the account blocks pushes that expose a private address, GitHub rejects the push, and the timeline says to pick another address.
 Whether GitHub shows a signed commit as Verified depends on the account (its address and its registered keys), so the proxy guarantees the signature and identity, and after each push it reads the head commit's verification through the commits API and reports any other result, such as `no_user` or `unverified_email`, in the timeline and the audit log.
 A `bot`-mode session with a linked user credits that user with a `Co-authored-by` trailer.
 
@@ -46,11 +46,11 @@ Reviewer, QA and other read-only personas get no signing key, since they cannot 
 
 Every commit a session adds to its branch, and therefore every commit in its PR, is signed; there is no unsigned fallback (SEC-7; the project owner decided this on 2026-10-08).
 Each refused push is written to the audit log (ADR-0015).
-Commits already on the base branch are not checked; if that branch is later rewound past one of them, it can reappear in the PR, and a ruleset requiring signed commits on the base branch blocks that merge.
+The guarantee covers the commits a session adds; commits already on the base branch are the repository's own history and are outside it, including if the base branch is later rewound so that one of them reappears in the PR.
 
 ## Validation checks
 
-1. A per-session key registered on the machine user signs guest commits through the agent, and the pushed commits, with the machine user's no-reply address as committer, show Verified as the machine user.
+1. A per-session key registered on the machine user signs guest commits through the agent, and the pushed commits, with the machine user's chosen verified address as committer, show Verified as the machine user.
 2. The same holds in `user` mode, with the key registered through the linked user's token, and the commits show Verified as the user.
 3. Commits pushed while a session key was registered stay Verified after the key is deleted from GitHub (GitHub records verification at push time and keeps it when keys are [rotated or revoked](https://docs.github.com/en/authentication/managing-commit-signature-verification/about-commit-signature-verification); deletion is not documented).
 
