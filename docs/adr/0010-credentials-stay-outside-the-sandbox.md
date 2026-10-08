@@ -51,7 +51,7 @@ Mechanics:
 - A compromised sandbox can act only through the proxies, within its persona's policy, and only while the session runs, except with direct credentials and over the tailnet, where it can do whatever that credential's scope or the tag's ACL allows until session end.
 - This exceeds ID-2; the requirement is met by construction and ID-2's "short-lived in sandbox" applies only to the non-HTTP row above.
 - The worker becomes the most sensitive component on a host; it runs outside every sandbox, and its proxies are covered by fuzz and policy tests.
-- ID-1 lists Bitwarden, Infisical and Vault; OpenBao is an external store in the same sense (a separate service, reached by reference). Adding it to ID-1 is a requirements change pending in the requirements document.
+- ID-1 names OpenBao as the first implementation and the only one that mints dynamic credentials, Bitwarden Secrets Manager for static secrets, and Vault or Infisical as possible later stores, matching this decision.
 - S3 SigV4 credentials for Cloudflare R2 have no OpenBao engine, so sessions cannot use R2 directly until a plugin exists.
 - Tools that pin certificates or ignore proxy and CA settings break; Phase 0 and the first Phase 1 slice verify Claude Code, `git`, `gh`, Docker pulls and the Officina toolchains.
 

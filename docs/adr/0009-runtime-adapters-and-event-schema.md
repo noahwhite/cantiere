@@ -75,7 +75,7 @@ Adding an ACP agent is a template and config change; the conformance suite below
 ## Consequences
 
 - One native adapter keeps the full Claude Code feature set and subscription mode; one ACP adapter covers every other agent, so supporting a new agent rarely means new code (RT-1).
-- Milestone 1 covers RT-1 only partly: Phase 1 ships Claude Code, and opencode and Codex arrive with the ACP adapter in Phase 2. This deviates from the requirements, which put all three in Phase 1; the requirements document still has to be updated to match.
+- Milestone 1 covers RT-1 only partly: Phase 1 ships Claude Code, and opencode and Codex arrive with the ACP adapter in Phase 2. RT-1 and the phased roadmap in the requirements record this split.
 - Other models (DeepSeek, Kimi, Qwen, local vLLM) are reached through an ACP agent such as opencode whose provider base URL points at the model gateway (ADR-0014); Cantiere needs no per-model code.
 - Mid-run messages queue for the next turn on both adapters; no runtime is steered mid-turn, and the UI says so.
 - ACP agents differ in which optional capabilities they implement (session loading, usage reporting, commands); the adapter reads the `initialize` capabilities and the UI hides what an agent lacks.
