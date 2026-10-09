@@ -125,7 +125,7 @@ The primary user is a solo founder-engineer running a team of agents; the agent 
 
 ## Functional requirements
 
-Priorities use MoSCoW: M = must (Phase 1 or 2), S = should (Phase 2 to 4), C = could (Phase 4 or later), W = won't do. Each ID is meant to become one or more OFF stories.
+Priorities use MoSCoW: M = must (Phase 1 or 2), S = should (Phase 2 to 4), C = could (Phase 4 or later), W = won't do. Each ID is meant to become one or more CAN stories.
 
 ### Sessions and sandboxes
 
