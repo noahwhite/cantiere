@@ -207,6 +207,8 @@ Each deployment registers its own public GitHub App, so it can work on any user'
 | WF-5 | Reviewer sessions receive a read-only checkout of the exact PR head and no write credentials | M |
 | WF-6 | Gate evidence (findings, verdicts, model, head SHA) is stored and posted to the PR and Linear issue | M |
 | WF-7 | Loop and stall detection: N repeated failing commands or no progress for T minutes -> pause and ask | M |
+| WF-8 | An implementer session cannot open a PR by any path, including the GitHub API proxy (ADR-0010), unless its branch head matches the worktree tree on which every test command declared in its repo blueprint last passed in one run; otherwise PR creation fails and names the files changed since. CI stays the authoritative test result | M |
+| WF-9 | A session paused by WF-7 can be retried from the inbox on another runtime its persona declares as a handoff target: same session, sandbox, branch and budget, with a handoff summary built from the RT-2 timeline | S |
 
 ### Knowledge and codebase understanding
 
@@ -248,7 +250,7 @@ Security is the main reason to move off the current containers, so these are all
 
 | ID | Requirement | Pri |
 | --- | --- | --- |
-| COST-1 | Live spend per session (tokens x model price), aggregated per issue, persona and day; API-key sessions are metered at the model gateway outside the sandbox, which is authoritative; subscription sessions use runtime-reported usage, a notional API-equivalent figure, and the provider's usage-limit windows are tracked separately | M |
+| COST-1 | Live spend per session (tokens x model price), aggregated per issue, persona and day; API-key sessions are metered at the model gateway outside the sandbox, which is authoritative; subscription sessions use runtime-reported usage, a notional API-equivalent figure, and the provider's usage-limit windows are tracked separately; every estimated or runtime-reported figure is labelled as such wherever it is shown (UX-1) | M |
 | COST-2 | Budget caps per session and per day, hard for API-key sessions: they are capped at the model gateway outside the sandbox, so spend cannot pass the cap except by provider-side usage a response does not report, which is reconciled on the next request; subscription sessions are capped best effort on their notional spend (COST-1) by the runtime adapter (ADR-0014); at the cap the session pauses and posts to the inbox | M |
 | COST-3 | Support subscription-auth runtimes (Claude Code setup-token, ChatGPT sign-in for Codex or opencode) alongside API keys; subscription mode is opt-in and available only when the deployment's single user is both the subscriber and the operator, on infrastructure only they control; multi-user deployments cannot enable it; it places the subscriber's own token in that subscriber's sessions, a permanent exception to ID-2 (ADR-0014) | M |
 | COST-4 | One 16-core / 64 GB host runs 10 concurrent sessions at Officina workload; sandboxes have CPU, memory and disk quotas | M |
@@ -321,8 +323,8 @@ Later option: a hosted control plane (UI, workflows, integrations) with customer
 
 1. **Phase 0 - Spike (timebox 1 week):** compare OpenHands runtime, Coder, E2B/microsandbox and plain Firecracker for SB-1, SEC-1 and the network-level part of SEC-2 (default deny; the proxy domain allowlist is checked in the first Phase 1 slice); verify the subscription-token auth signals (COST-3, architecture test 6a; the broker-held credential question is answered in ADR-0014); run one Claude Code session headless end to end. Exit: sandbox backend chosen, ADR merged.
 2. **Phase 1 - Single-session MVP:** SB-1..6, RT-1 (Claude Code), RT-2..4, RT-6, IN-3, IN-4, GH-1..3, GH-5..8, UX-1..5, SEC-1..5, SEC-7, ID-1..4, KN-1, COST-1..4, OBS-1..3, OSS-1..4, OSS-6. Exit: one Officina story implemented through PR from the web UI with no terminal container.
-3. **Phase 2 - Ticket-driven and orchestrated:** IN-1, IN-2, GH-4, IN-5, RT-1 (opencode, Codex CLI), UX-6..8, WF-1..7, SEC-6. Exit: assigning an OFF story runs the full reference workflow to a merge-approval request; reviewers run read-only.
-4. **Phase 3 - Always-on:** IN-6..8, SB-7, RT-5, KN-2, KN-4, ID-5, GH-9, COST-5, OBS-4. Exit: terminal containers retired; QA and PagerDuty sessions start without a human.
+3. **Phase 2 - Ticket-driven and orchestrated:** IN-1, IN-2, GH-4, IN-5, RT-1 (opencode, Codex CLI), UX-6..8, WF-1..8, SEC-6. Exit: assigning an OFF story runs the full reference workflow to a merge-approval request; reviewers run read-only.
+4. **Phase 3 - Always-on:** IN-6..8, SB-7, RT-5, WF-9, KN-2, KN-4, ID-5, GH-9, COST-5, OBS-4. Exit: terminal containers retired; QA and PagerDuty sessions start without a human.
 5. **Phase 4 - Community:** OSS-5, KN-3, SB-8, ID-6, GH-10, GitHub Issues and Jira providers, first external release.
 
 ### Open questions
@@ -334,4 +336,4 @@ Later option: a hosted control plane (UI, workflows, integrations) with customer
 - [x] GitHub App vs fine-grained PATs for per-session tokens, given the `noahwhite` vs officina identity split. Resolved: per-deployment public GitHub App with optional user linking (GH-1..10).
 - [x] Project name and GitHub home (`noahwhite/*` vs a new org) for the open-source repo. Resolved: Cantiere, public at github.com/noahwhite/cantiere (personal account for showcase; transfer to an org later if needed).
 - [x] Self-hosted only, or also a hosted SaaS? Licensing allows both; a SaaS needs Anthropic's Commercial Terms, per-user model credentials (no reselling usage), customer isolation and one public app owned by the operator, as Devin does. Resolved: self-hosted now (see Deployment model).
-- [ ] Should memory stay file-based (current `MEMORY.md` index) or move to a store with review UI?
+- [x] Should memory stay file-based (current `MEMORY.md` index) or move to a store with review UI? Resolved: file-based and versioned in Git; memory edits arrive as PRs (KN-4), so the PR is the review UI (RT-5). An extraction store such as Mem0 was rejected because automatic extraction bypasses that review.
