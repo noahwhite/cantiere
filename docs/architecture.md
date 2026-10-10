@@ -183,7 +183,7 @@ The original Phase 0 item "test broker-held subscription credentials" is answere
 
 ## Open questions after these ADRs
 
-- [ ] Memory: keep file-based `MEMORY.md` or move to a store with a review UI (RT-5, Phase 3). Not needed for milestone 1; skills and memory mount read-only from the pinned skills commit (ADR-0008).
+- [x] Memory: keep file-based `MEMORY.md` or move to a store with a review UI (RT-5, Phase 3). Resolved: file-based and versioned in Git; memory edits arrive as PRs (KN-4), so the PR is the review UI (RT-5). Not needed for milestone 1; skills and memory mount read-only from the pinned skills commit (ADR-0008).
 - [ ] Which Hetzner dedicated model and location runs the first worker (16 cores / 64 GB or larger); Hetzner Cloud cannot host workers (ADR-0007).
 - [ ] Workflow script language for WF-2 (Phase 2), built on ADR-0006 primitives.
 - [ ] Which ACP agents the Phase 2 template ships (opencode and `codex-acp` at minimum), and whether each passes the ADR-0009 conformance suite.

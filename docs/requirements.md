@@ -207,8 +207,8 @@ Each deployment registers its own public GitHub App, so it can work on any user'
 | WF-5 | Reviewer sessions receive a read-only checkout of the exact PR head and no write credentials | M |
 | WF-6 | Gate evidence (findings, verdicts, model, head SHA) is stored and posted to the PR and Linear issue | M |
 | WF-7 | Loop and stall detection: N repeated failing commands or no progress for T minutes -> pause and ask | M |
-| WF-8 | An implementer session cannot open a PR while its branch head differs from the worktree tree recorded at its last passing test command (`test_commands` in the repo blueprint); the step fails and names the files changed since. CI stays the authoritative test result | M |
-| WF-9 | A session paused by WF-7 can be retried from the inbox on another runtime its persona declares (`handoff_runtimes`): same session, sandbox, branch and budget, with a handoff summary built from the RT-2 timeline | S |
+| WF-8 | An implementer session cannot open a PR by any path, including the GitHub API proxy (ADR-0010), unless its branch head matches the worktree tree on which every test command declared in its repo blueprint last passed in one run; otherwise PR creation fails and names the files changed since. CI stays the authoritative test result | M |
+| WF-9 | A session paused by WF-7 can be retried from the inbox on another runtime its persona declares as a handoff target: same session, sandbox, branch and budget, with a handoff summary built from the RT-2 timeline | S |
 
 ### Knowledge and codebase understanding
 
