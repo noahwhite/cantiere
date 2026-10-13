@@ -67,3 +67,14 @@ The terms differ by vendor:
 - Subscription sessions do not load the target repository's Claude Code settings, hooks or `.mcp.json`; a repository that relies on them needs the equivalent in the org layer of the blueprint (ADR-0008).
 - Subscription mode needs the subscriber about once a year to renew the token; a missed renewal stops that subscriber's subscription sessions, not API-key sessions.
 - Concurrency limits for subscription use are not defined by the vendors; Cantiere exposes a per-user concurrent-session cap for subscription mode.
+
+## Alternatives considered
+
+- **[Tailscale Aperture](https://tailscale.com/docs/aperture/how-aperture-works) as the model gateway** (evaluated 2026-10-13): Aperture holds provider keys centrally, authenticates callers by tailnet identity, and logs and meters usage.
+  It is rejected as the gateway because:
+  - It is a closed-source service hosted by Tailscale with no self-hosted option, and using your own provider keys outside its Personal plan needs a sales contract ([get started](https://tailscale.com/docs/aperture/get-started)).
+  - Its [quotas](https://tailscale.com/docs/aperture/configuration) (per user, per node or shared) deduct the estimated cost after the response, and the last bucket in a chain can go negative; there is no worst-case reservation against a lease from Cantiere's daily counter, so COST-2's hard cap cannot be enforced.
+  - Per-session attribution (COST-1) would mean mapping each ephemeral node's device ID back to its session and importing Aperture's usage records; Aperture's own session IDs come from the client inside the sandbox, so they cannot be trusted, and sessions without a tailnet node (ADR-0011) have no identity to call it with.
+  - Provider keys would sit as literal values in Aperture's config instead of the secret store (ADR-0010).
+  Aperture behind the worker's gateway, as one more upstream provider for deployments that already run it, is not covered by this decision.
+  It would keep metering and budgets on the worker, but needs the worker itself on the tailnet; adding it takes a superseding ADR.
