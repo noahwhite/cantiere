@@ -65,6 +65,6 @@ Mechanics:
   - Credentials are literal values in its JSON config, with no references to an external store.
   - Grants match users, groups, tags, models and connector or tool IDs, not HTTP method, path or body, so the GitHub route catalog, branch bindings, GraphQL mutation list and git push checks above cannot be expressed.
   - It cannot mint GitHub App installation tokens or narrow them with `repository_ids`; a static or client-credentials connector shares one credential with every caller its grant matches, which breaks ID-3 and GH-5.
-  - A sandbox would be identified by its node's tags, so sessions with the same tags are indistinguishable for audit and policy.
+  - Grants match a sandbox through its node's tags, so sessions with the same tags get the same grants; only the per-node device ID in Aperture's records separates them, and Cantiere would have to map it back to the session.
   - HTTP connectors are reached at `/v1/connectors/<id>/<path>` instead of the real host, so `git`, `gh` and registries would still need the transparent proxy.
   - It has no database, SSH, signing-key or other non-HTTP credentials, so OpenBao would still be needed.
