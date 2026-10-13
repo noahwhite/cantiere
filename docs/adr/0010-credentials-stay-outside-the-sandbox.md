@@ -59,3 +59,12 @@ Mechanics:
 
 - **Bitwarden Secrets Manager first:** already in use by the maintainers, but it stores static values only, so every short-lived credential type would need minting code in Cantiere.
 - **HashiCorp Vault:** the same engines, but under the Business Source License; OpenBao is its MPL-2.0 fork under the Linux Foundation.
+- **[Tailscale Aperture](https://tailscale.com/docs/aperture/how-aperture-works) as the broker** (evaluated 2026-10-13, GA since 2026-08-26): a gateway on the tailnet that identifies callers by tailnet identity and injects credentials for model providers, MCP servers and [HTTP connectors](https://tailscale.com/docs/aperture/connectors/reference).
+  It would replace the worker proxies, not OpenBao, and it falls short of this decision:
+  - It is a closed-source service hosted by Tailscale with no self-hosted option, so every Cantiere deployment would depend on a Tailscale contract.
+  - Credentials are literal values in its JSON config, with no references to an external store.
+  - Grants match users, groups, tags, models and connector or tool IDs, not HTTP method, path or body, so the GitHub route catalog, branch bindings, GraphQL mutation list and git push checks above cannot be expressed.
+  - It cannot mint GitHub App installation tokens or narrow them with `repository_ids`; a static or client-credentials connector shares one credential with every caller its grant matches, which breaks ID-3 and GH-5.
+  - A sandbox would be identified by its node's tags, so sessions with the same tags are indistinguishable for audit and policy.
+  - HTTP connectors are reached at `/v1/connectors/<id>/<path>` instead of the real host, so `git`, `gh` and registries would still need the transparent proxy.
+  - It has no database, SSH, signing-key or other non-HTTP credentials, so OpenBao would still be needed.

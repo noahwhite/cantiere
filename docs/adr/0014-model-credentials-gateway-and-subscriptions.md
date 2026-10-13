@@ -67,3 +67,14 @@ The terms differ by vendor:
 - Subscription sessions do not load the target repository's Claude Code settings, hooks or `.mcp.json`; a repository that relies on them needs the equivalent in the org layer of the blueprint (ADR-0008).
 - Subscription mode needs the subscriber about once a year to renew the token; a missed renewal stops that subscriber's subscription sessions, not API-key sessions.
 - Concurrency limits for subscription use are not defined by the vendors; Cantiere exposes a per-user concurrent-session cap for subscription mode.
+
+## Alternatives considered
+
+- **[Tailscale Aperture](https://tailscale.com/docs/aperture/how-aperture-works) as the model gateway** (evaluated 2026-10-13): Aperture holds provider keys centrally, authenticates callers by tailnet identity, and logs and meters usage.
+  It is rejected as the gateway because:
+  - It is a closed-source service hosted by Tailscale with no self-hosted option, and using your own provider keys outside its Personal plan needs a sales contract ([get started](https://tailscale.com/docs/aperture/get-started)).
+  - Its [spending limits](https://tailscale.com/docs/aperture/manage-spending) are per-user and org-wide quotas, not per-session reservations against a lease, so COST-2's hard cap cannot be enforced.
+  - Sessions with the same Tailscale tags present the same identity, so cost events cannot be attributed per session (COST-1).
+  - Provider keys would sit as literal values in Aperture's config instead of the secret store (ADR-0010).
+  Aperture behind the worker's gateway, as one more upstream provider for deployments that already run it, is not covered by this decision.
+  It would keep metering and budgets on the worker, but needs the worker itself on the tailnet; adding it takes a superseding ADR.
