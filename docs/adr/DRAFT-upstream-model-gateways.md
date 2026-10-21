@@ -96,9 +96,11 @@ secrets: [{provider: anthropic-via-corp, ref: "openbao://kv/models#corp-gw"}]
 - Upstreams add two exceptions to unchanged passthrough, next to `cantiere_budget_exceeded` (ADR-0014): the alias rewrite of the request's model, and this refusal replacement.
 - An error does not prove that no model ran: an upstream can fail after a billed call, or block a response with a post-call guardrail or data-loss check.
   So only errors the operator declares as returned before any model call, the `refusals` and `pre_invocation_errors` entries, release their reservation, and only when the response reports no usage and carries no `model_signal`; otherwise it is charged like any other error.
-  A releasing `pre_invocation_errors` match also pauses the session to the inbox, as a refusal does, so a mis-declared mapping releases at most one reservation before a person sees it.
+  A releasing `pre_invocation_errors` match also pauses the session to the inbox, as a refusal does.
+  Once a releasing match has paused the session, later matches from requests still in flight are charged like any other error, not released, so a mis-declared mapping releases at most one reservation before a person sees it.
   A mapping must not match an error shape the upstream also returns after a model call, such as a guardrail block shared by pre-call and post-call checks; Cantiere's shipped mappings are verified by the conformance suite, and operator-added mappings are listed separately in the config repo's approval diff (ADR-0017).
   Every other upstream error, including 5xx and unmatched 429, passes through unchanged and is charged at its reported usage priced at the most expensive of the requested model and its declared fallbacks, since the model check covers successful responses only, so an error's signal, when present, is not trusted to select a price, or at its full reservation when it reports none, under ADR-0014's rule for a request whose final usage never arrives.
+  An error whose `model_signal` is present but matches none of the requested model's or its declared fallbacks' `signal_values` is a mismatch: it is charged the larger of its full reservation and its reported usage priced at the most expensive declared model, records `model_mismatch` and pauses the session; a matching signal is still not used to select a lower price.
 
 **Reconciliation and key limits.**
 
@@ -127,7 +129,7 @@ To be numbered on acceptance, in the Cost section of requirements.md, priority S
 4. A successful response whose `model_signal` matches none of the requested model's or its declared fallbacks' `signal_values`, or lacks the signal, is aborted before any byte reaches the guest, charged its full reservation, and pauses the session.
    Config validation rejects a signal value listed under two model keys.
    This is tested against each conformance-suite upstream by forcing an undeclared failover inside it, which must be detected even when the response's own `model` field still shows the requested alias.
-5. A mapped upstream refusal that carries no `model_signal` becomes `cantiere_upstream_refused`, releases its reservation and pauses the session, and the runtime does not retry it; a mapped error that reports usage is charged, not released; for each conformance-suite upstream the suite drives every post-call failure path it offers (a post-call guardrail or data-loss block, and a failure after a billed call) and asserts that none matches a shipped release mapping; an undeclared upstream 5xx without usage is charged its full reservation.
+5. A mapped upstream refusal that carries no `model_signal` becomes `cantiere_upstream_refused`, releases its reservation and pauses the session, and the runtime does not retry it; a mapped error that reports usage is charged, not released; matching errors from requests in flight after a releasing match has paused the session are charged, not released; an error carrying a signal outside the declared `signal_values` is charged its full reservation and pauses the session; for each conformance-suite upstream the suite drives every post-call failure path it offers (a post-call guardrail or data-loss block, and a failure after a billed call) and asserts that none matches a shipped release mapping; an undeclared upstream 5xx without usage is charged its full reservation.
 6. Attribution headers reach the upstream with server-filled values; guest-supplied headers with the same names are stripped.
 7. A request with no output limit, whose declared fallback has a larger maximum output or a higher tier price than the requested model, reserves the fallback's worst case.
 
@@ -136,7 +138,8 @@ To be numbered on acceptance, in the Cost section of requirements.md, priority S
 - Organisations with a mandated gateway can adopt Cantiere without giving it raw provider keys.
 - A stolen upstream key works only where the upstream is reachable and within the upstream's own budget for it, which for a private upstream means inside the operator's network.
 - Cantiere's spend figures become estimates against the upstream's invoice.
-  Caps stay hard in COST-2's sense only as far as the upstream reports the answering model truthfully in its `model_signal`, the same trust ADR-0014 places in a provider's usage and model fields, and as far as the release mappings match only errors returned before a model call; the upstream key's own budget is the backstop.
+  Caps stay hard in COST-2's sense only as far as the upstream reports the answering model truthfully in its `model_signal`, the same trust ADR-0014 places in a provider's usage and model fields, and as far as the release mappings match only errors returned before a model call.
+  Error responses without a signal are priced against the declared models, so an undeclared failover that ends in such an error is under-charged and not detected; the upstream key's own budget is the backstop.
 - Only upstreams that expose a per-response model signal are supported.
 - An upstream that rewrites or drops a provider's usage fields fails validation check 1 or 2 and is unsupported for that API shape.
 - Refusal mappings and usage APIs are per-upstream configuration that operators maintain; Cantiere ships tested defaults only for the upstreams in its conformance suite.
