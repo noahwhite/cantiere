@@ -26,3 +26,4 @@ The architecture these decisions add up to is in [architecture.md](../architectu
 | [0019](0019-packaging-and-install.md) | Static worker and guest binaries, self-contained Java server, systemd; Compose for the control plane only | Accepted |
 
 Accepted statuses take effect when the PR that adds them merges; Proposed ADRs flip to Accepted in the PR that records their validation results.
+Files named `DRAFT-*.md` are unnumbered drafts under discussion: they are not in force, take no sequence number and are not indexed until they are proposed.
