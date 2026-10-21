@@ -97,7 +97,7 @@ secrets: [{provider: anthropic-via-corp, ref: "openbao://kv/models#corp-gw"}]
 - An error does not prove that no model ran: an upstream can fail after a billed call, or block a response with a post-call guardrail or data-loss check.
   So only errors the operator declares as returned before any model call, the `refusals` and `pre_invocation_errors` entries, release their reservation, and only when the response reports no usage and carries no `model_signal`; otherwise it is charged like any other error.
   A releasing `pre_invocation_errors` match also pauses the session to the inbox, as a refusal does.
-  Once a releasing match has paused the session, later matches from requests still in flight are charged like any other error, not released, so a mis-declared mapping releases at most one reservation per session before a person sees it; the upstream key's own budget bounds the total across sessions.
+  Once a releasing match has paused the session, later matches from requests still in flight are charged like any other error, not released, so a mis-declared mapping releases at most one reservation per session before a person sees it; across sessions, a hard budget on the upstream key bounds the total where the operator sets one, and otherwise nothing does.
   A mapping must not match an error shape the upstream also returns after a model call, such as a guardrail block shared by pre-call and post-call checks; Cantiere's shipped mappings are verified by the conformance suite, and operator-added mappings are listed separately in the config repo's approval diff (ADR-0017).
   Every other upstream error, including 5xx and unmatched 429, passes through unchanged and is charged at its reported usage priced at the most expensive of the requested model and its declared fallbacks, since the model check covers successful responses only, so an error's signal, when present, is not trusted to select a price, or at its full reservation when it reports none, under ADR-0014's rule for a request whose final usage never arrives.
   An error whose `model_signal` is present but matches none of the requested model's or its declared fallbacks' `signal_values` is a mismatch: it is charged the larger of its full reservation and its reported usage priced at the most expensive declared model, records `model_mismatch` and pauses the session; a matching signal is still not used to select a lower price.
@@ -106,6 +106,7 @@ secrets: [{provider: anthropic-via-corp, ref: "openbao://kv/models#corp-gw"}]
 
 - The daily reconciliation compares recorded cost per upstream key with the upstream's usage API where `usage_report` is set; without it the UI says reconciliation is unavailable for that key.
 - The docs recommend a hard budget on each upstream key, which is the provider-side key limit COST-2 relies on as a backstop, and which many providers do not offer directly.
+  Without one, the backstops named below do not apply.
 - Spend through an upstream is shown as estimated, because the upstream's bill is the invoice (COST-1, UX-1); undeclared upstream errors are charged in full, so recorded spend can exceed the invoice.
 
 **Scope.**
@@ -136,11 +137,11 @@ To be numbered on acceptance, in the Cost section of requirements.md, priority S
 ## Consequences
 
 - Organisations with a mandated gateway can adopt Cantiere without giving it raw provider keys.
-- A stolen upstream key works only where the upstream is reachable and within the upstream's own budget for it, which for a private upstream means inside the operator's network.
+- A stolen upstream key works only where the upstream is reachable and within the upstream's own budget for it where one is set, which for a private upstream means inside the operator's network.
 - Cantiere's spend figures become estimates against the upstream's invoice.
   Caps stay hard in COST-2's sense only as far as the upstream reports the answering model truthfully in its `model_signal`, the same trust ADR-0014 places in a provider's usage and model fields, and as far as the release mappings match only errors returned before a model call.
-  Error responses without a signal are priced against the declared models, so an undeclared failover that ends in such an error is under-charged and not detected; the upstream key's own budget is the backstop.
-  A truthful signal that names an undeclared model, on a successful or an error response, is detected and pauses the session, but that request has already run at the undeclared model's price, so its cost can exceed its reservation, like a price the price table does not list yet (ADR-0014); daily reconciliation detects it where `usage_report` is set, and the upstream key's budget bounds it.
+  Error responses without a signal are priced against the declared models, so an undeclared failover that ends in such an error is under-charged and not detected; the upstream key's own budget, where set, is the backstop.
+  A truthful signal that names an undeclared model, on a successful or an error response, is detected and pauses the session, but that request has already run at the undeclared model's price, so its cost can exceed its reservation, like a price the price table does not list yet (ADR-0014); daily reconciliation detects it where `usage_report` is set, and the upstream key's budget, where set, bounds it.
 - Only upstreams that expose a per-response model signal are supported.
 - An upstream that rewrites or drops a provider's usage fields fails validation check 1 or 2 and is unsupported for that API shape.
 - Refusal mappings and usage APIs are per-upstream configuration that operators maintain; Cantiere ships tested defaults only for the upstreams in its conformance suite.
