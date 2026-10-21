@@ -57,7 +57,7 @@ The terms differ by vendor:
 - The worker and the process talk over one channel, and it follows high-side and low-side rules: the worker is the high side and only pushes; the process is the low side and only reports.
   - Down (worker to process): `Init` (protocol version, session ID, a random instance ID, that session's secret values with their injection rules, the per-session CA key, the budget lease), `SecretUpdate` and `SecretRevoke` (replace or remove one value, for refresh such as the hourly GitHub token and for revocation such as an unlinked user's token, ADR-0010, ADR-0012), `LeaseTopUp`, `StartDecision`, `RecordAck` and `Stop`.
     A secret update applies to requests the process forwards after it, without restarting the process.
-    On `SecretRevoke` the process drops the value and refuses every request that would use it and has not yet been forwarded, including requests waiting for a `StartDecision`, sending an end record marked not forwarded for each; requests already forwarded are not cut.
+    On `SecretRevoke` the process drops the value and refuses every request that would use it and has not yet been forwarded, including requests waiting for a `StartDecision`; it sends an end record marked not forwarded for each request that has a start record, and a `Denial` for each that does not; requests already forwarded are not cut.
     The worker chooses what to send from the references the persona declares (ID-3); nothing the process sends changes which secrets it gets.
   - Up (process to worker): `Hello`, `StartRecord`, `EndRecord` and `Denial`, nothing else.
     No message lets the process name a secret, ask for a larger lease, or refer to another session.
