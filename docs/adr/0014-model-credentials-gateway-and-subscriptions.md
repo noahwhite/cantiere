@@ -63,10 +63,12 @@ The terms differ by vendor:
   Start records are idempotent by request ID: the process resends an unanswered start after a reconnect, and the server returns its first decision only while the session is still running; once the session has ended it rejects every start, including a resend of one it had accepted, and records that request as not forwarded.
   If the caller has gone away before the decision arrives, the process sends an end record marked not forwarded, which releases the reservation.
 - When a request ends, the process appends an end record with the same request ID (status and, for a model request, the usage and cost) to a per-session journal file, then sends it; the worker reads the journal when it adopts or restarts the process and resends what the server has not acknowledged, and the server ignores a second end record for the same request ID.
-  The journal holds only request IDs, statuses, usage, cost and denial details, never secrets or request or response bodies, and the worker deletes it when the session's records are all acknowledged.
+  The process scrubs every record with the session's secret values, using the worker's scrubber (ADR-0010), before writing it, so the journal holds only request IDs, statuses, usage, cost and scrubbed denial details, never secrets or request or response bodies, and the worker deletes it when the session's records are all acknowledged.
   The worker scrubs and relays both records to the server as before (ADR-0010, ADR-0015).
 - Each denial is an individual record, written to the same journal and sent the same way, without a start record (ADR-0011, SEC-2).
-  The journal has a fixed size cap; when it is full the process stops accepting new connections from the guest until the worker has drained it, so a guest cannot exhaust the process's memory or disk during a worker outage, and no denial is summarised or dropped.
+  The journal has a fixed size cap.
+  Accepting a start reserves journal space for that request's end record, so an in-flight request can always record its usage and cost.
+  When the rest of the journal is full, the process stops reading new requests from every guest connection, open or new, until the worker has drained it; no new request means no new denial, so a guest cannot exhaust the process's memory or disk during a worker outage, and no denial or end record is summarised or dropped.
 - The process runs in its own systemd scope outside the worker's cgroup, like the session's VM (ADR-0003), so restarting or upgrading the worker does not cut in-flight model streams.
   While the worker or the server is unreachable, no start record can be accepted, so the process forwards no new credentialed request; streams already in flight finish and write their end records to the journal.
 - If the process exits, the session's egress stops, because nftables still redirects only to it (fail-closed).
