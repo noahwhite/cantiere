@@ -56,7 +56,8 @@ The terms differ by vendor:
   Secrets reach it by the chain ADR-0010 already sets, each hop holding less: secret store to server (the only store client) to worker to proxy process.
 - The worker and the process talk over one channel, and it follows high-side and low-side rules: the worker is the high side and only pushes; the process is the low side and only reports.
   - Down (worker to process): `Init` (protocol version, session ID, a random instance ID, that session's secret values with their injection rules, the per-session CA key, the budget lease), `SecretUpdate` and `SecretRevoke` (replace or remove one value, for refresh such as the hourly GitHub token and for revocation such as an unlinked user's token, ADR-0010, ADR-0012), `LeaseTopUp`, `StartDecision`, `RecordAck` and `Stop`.
-    A secret update or revocation applies to requests the process starts after it, without restarting the process.
+    A secret update applies to requests the process forwards after it, without restarting the process.
+    On `SecretRevoke` the process drops the value and refuses every request that would use it and has not yet been forwarded, including requests waiting for a `StartDecision`, sending an end record marked not forwarded for each; requests already forwarded are not cut.
     The worker chooses what to send from the references the persona declares (ID-3); nothing the process sends changes which secrets it gets.
   - Up (process to worker): `Hello`, `StartRecord`, `EndRecord` and `Denial`, nothing else.
     No message lets the process name a secret, ask for a larger lease, or refer to another session.
@@ -122,6 +123,8 @@ The terms differ by vendor:
 ## Consequences
 
 - API-key sessions get hard budget enforcement outside the sandbox, at the cost of rejecting a request near the cap whose worst case does not fit even if its real cost would; subscription sessions get best-effort enforcement only (the adapter interrupts at the cap, the gateway cannot).
+  "Hard" is in COST-2's sense: nothing the guest does can spend past the cap.
+  A compromise of the proxy process itself, an escape from the sandbox into it, is outside that guarantee, as an escape into the worker would have been with an in-worker gateway; provider-side key limits bound it and daily reconciliation detects it (above).
 - A bug in the code that parses sandbox-controlled TLS, HTTP, GraphQL or model streams reaches one session's proxy process, that session's secrets and its remaining lease, not the worker's host privileges or other sessions.
 - Budget enforcement trusts the proxy process's usage reports; a compromise of that process can exceed the cap up to the provider-side limit, which provider limits and daily reconciliation bound and detect.
 - The worker and the proxy process need a small protocol for secrets, lease top-ups and start and end records, plus a per-session journal file for end records, and each session costs one more process of a few MB.
