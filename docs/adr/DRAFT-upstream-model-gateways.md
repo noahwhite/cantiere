@@ -2,7 +2,7 @@
 
 - Status: Draft - not proposed yet, no sequence number assigned; the project owner is still deciding whether to adopt it
 - Date: 2026-10-21
-- Requirements: COST-1, COST-2, RT-3, SEC-2, ID-1, ID-3, ID-4; proposed requirement below
+- Requirements: COST-1, COST-2 (amended below), RT-3, SEC-2, ID-1, ID-3, ID-4; proposed requirement below
 - Builds on: ADR-0014 as amended by open PR #15 (proxy process confinement and budget bounds); if that PR changes before merging, this draft is revisited
 
 ## Context
@@ -106,7 +106,7 @@ secrets: [{provider: anthropic-via-corp, ref: "openbao://kv/models#corp-gw"}]
 
 - The daily reconciliation compares recorded cost per upstream key with the upstream's usage API where `usage_report` is set; without it the UI says reconciliation is unavailable for that key.
 - The docs recommend a hard budget on each upstream key, which is the provider-side key limit COST-2 relies on as a backstop, and which many providers do not offer directly.
-  Without one, the backstops named below do not apply.
+  Without one, the key-budget backstops named under Consequences do not apply.
 - Spend through an upstream is shown as estimated, because the upstream's bill is the invoice (COST-1, UX-1); undeclared upstream errors are charged in full, so recorded spend can exceed the invoice.
 
 **Scope.**
@@ -121,6 +121,10 @@ secrets: [{provider: anthropic-via-corp, ref: "openbao://kv/models#corp-gw"}]
 To be numbered on acceptance, in the Cost section of requirements.md, priority S, Phase 2:
 
 > A model provider entry can name an upstream gateway, public or on a declared private address, with its own auth header, static and attribution headers, model aliases with priced fallbacks, a per-response model signal and refusal mapping; metering, budgets and the deny list stay on the session gateway and are checked against the model the upstream reports answering; spend through an upstream is labelled estimated (ADR-NNNN).
+
+Adopted with it, COST-2's exception clause gains the cases this draft cannot cap:
+
+> ... or, through an upstream gateway (ADR-NNNN), a model the upstream does not report truthfully, an undeclared failover that ends in an error with no model signal, or a release mapping that matches an error returned after a model call (at most one reservation per session).
 
 ## Validation checks
 
