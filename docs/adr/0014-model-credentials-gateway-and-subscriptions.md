@@ -67,8 +67,8 @@ The terms differ by vendor:
   The worker scrubs and relays both records to the server as before (ADR-0010, ADR-0015).
 - Each denial is an individual record, written to the same journal and sent the same way, without a start record (ADR-0011, SEC-2).
   The journal has a fixed size cap.
-  Accepting a start reserves journal space for that request's end record, so an in-flight request can always record its usage and cost.
-  When the rest of the journal is full, the process stops reading new requests from every guest connection, open or new, until the worker has drained it; no new request means no new denial, so a guest cannot exhaust the process's memory or disk during a worker outage, and no denial or end record is summarised or dropped.
+  The process reads a request from a guest connection only after reserving journal space for one record about it, which becomes either its denial or its end record, so every request it has read can always be recorded.
+  When no space is left, the process stops reading requests from every guest connection, open or new, until the worker has drained the journal, so a guest cannot exhaust the process's memory or disk during a worker outage, and no denial or end record is summarised or dropped.
 - The process runs in its own systemd scope outside the worker's cgroup, like the session's VM (ADR-0003), so restarting or upgrading the worker does not cut in-flight model streams.
   While the worker or the server is unreachable, no start record can be accepted, so the process forwards no new credentialed request; streams already in flight finish and write their end records to the journal.
 - If the process exits, the session's egress stops, because nftables still redirects only to it (fail-closed).
