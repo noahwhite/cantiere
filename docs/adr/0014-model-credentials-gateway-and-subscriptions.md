@@ -45,6 +45,7 @@ The terms differ by vendor:
   - Input: a request that refers to input it does not carry (OpenAI `previous_response_id` or `conversation`, uploaded file IDs) is refused.
     Input tokens are counted with the model's tokenizer where the provider publishes it, and otherwise bounded at one token per UTF-8 byte of the request's text, including system prompt and tool definitions, plus the provider's published per-message and tool overhead; images and documents use the provider's published token formula.
     The bound is priced at the highest input price the request can trigger: a cache write at the longest duration it asks for, and a long-context tier once the bound crosses that tier's threshold.
+  - Modalities: each model's price entry lists the input and output modalities it prices, such as audio tokens on Chat Completions; a request that sends or asks for a modality its model's entry does not price is refused, and the bounds below are priced at the highest price among the modalities the request can produce.
   - Output: the request's output limit (`max_tokens`, `max_output_tokens` or `max_completion_tokens`), or the model's maximum output from the price table when the request sets none; a request without a limit for a model with no maximum output entry is refused.
     A choice count (`n`) multiplies the output bound.
   - Provider-run tools, such as web search, are allowed only when the price table prices them and the request caps their use (for example Anthropic's `max_uses`); the reservation includes that cap, and any other provider-run tool is refused.
@@ -87,8 +88,9 @@ The terms differ by vendor:
   Inside them, the process caps concurrent guest connections, header and body sizes, GraphQL document size, and the bytes and compression ratio a pushed pack may inflate to during the secret scan; a request over a cap is refused with a `Denial`.
   An error or panic while handling one guest connection ends that connection, with its end record or denial, not the process.
 - The namespace's output chain matches the proxy user's packets and drops them by default.
-  Before any allow rule it drops every non-global address range (RFC 1918, `100.64.0.0/10`, loopback, link-local, unique local, IPv4-mapped and NAT64 prefixes, documentation and reserved ranges), the host's own addresses, and the addresses of the server, OpenBao, Postgres and the object store.
-  It then allows DNS to the worker resolver, and TCP 80 and 443 only to addresses in a per-session set that the resolver fills with its answers for allowlisted names, each for the answer's TTL.
+  It first accepts packets of established connections, which includes the process's replies to guest connections, and DNS to the worker resolver's address.
+  Before any rule that allows a new connection it drops every non-global address range (RFC 1918, `100.64.0.0/10`, loopback, link-local, unique local, IPv4-mapped and NAT64 prefixes, documentation and reserved ranges), the host's own addresses, and the addresses of the server, OpenBao, Postgres and the object store.
+  It then allows new TCP connections to ports 80 and 443 only to addresses in a per-session set that the resolver fills with its answers for allowlisted names, each for the answer's TTL.
   The resolver refuses any answer in a non-global range, which closes DNS rebinding through an allowlisted wildcard, and refuses the names of platform services, since services behind a CDN share addresses with allowed sites.
   A model upstream on a private address, such as a local vLLM, is declared in the config repo with its address and port, and only those are added to the allow rules.
   The guest's traffic never uses this chain: it reaches the process through the redirect and the listening sockets (ADR-0011).
@@ -99,7 +101,7 @@ The terms differ by vendor:
   The worker creates a `SOCK_SEQPACKET` Unix socket pair, so each message is one datagram and no restart can leave a partial frame, together with the namespace's listening sockets (so the process needs no privilege to bind ports 80 and 443) and the journal file (below), and passes them to the spawn helper.
   It keeps a pidfd for the process and sends `Init` as the first message; values stay in the process's memory, never on disk, in argv or in its environment (ID-4).
 - The channel follows high-side and low-side rules: the worker is the high side and only pushes; the process is the low side and only reports.
-  - Down (worker to process): `Init` (protocol version, session ID, a random instance ID, that session's secret values with their injection rules, the per-session CA key, the budget lease, the session's domain allowlist with each domain's mode, the upstream trust roots, the resolver address and the drain bound used on end of file), `SecretUpdate` and `SecretRevoke` (replace or remove one value, for refresh such as the hourly GitHub token and for revocation such as an unlinked user's token, ADR-0010, ADR-0012), `PolicyUpdate` (replaces the allowlist and modes and drops every cached decision, for example when an operator approves a repo-layer egress entry or a persona's permissions change), `LeaseTopUp`, `StartDecision`, `RecordAck`, `Resync` and `Stop`.
+  - Down (worker to process): `Init` (protocol version, session ID, a random instance ID, that session's secret values with their injection rules, the per-session CA key, the budget lease, the session's domain allowlist with each domain's mode, the upstream trust roots, the resolver address, the liveness bound and the drain bound used on end of file), `SecretUpdate` and `SecretRevoke` (replace or remove one value, for refresh such as the hourly GitHub token and for revocation such as an unlinked user's token, ADR-0010, ADR-0012), `PolicyUpdate` (replaces the allowlist and modes and drops every cached decision, for example when an operator approves a repo-layer egress entry or a persona's permissions change), `LeaseTopUp`, `StartDecision`, `RecordAck`, `Resync`, `Heartbeat` and `Stop`.
     A secret update applies to requests the process forwards after it, without restarting the process.
     On `SecretRevoke` the process drops the value and refuses every request that would use it and has not yet been forwarded, including requests waiting for a `StartDecision`; it sends an end record marked not forwarded for each request that has a start record, and a `Denial` for each that does not; requests already forwarded are not cut.
     The worker chooses what to send from the references the persona declares (ID-3); nothing the process sends changes which secrets it gets.
@@ -121,6 +123,7 @@ The terms differ by vendor:
   The server decides, appends the audit row with the action, target, head SHA and decision (SEC-5), and returns the `StartDecision` through the worker; the process forwards the request only after an allow, and records a denied one as not forwarded.
 - For a read-only action the decision may be cacheable, with a key (host, method and path pattern) and a TTL (ADR-0015).
   The process then decides matching requests from its cache without a round trip; it writes each one's start record to the journal before forwarding it and sends it afterwards, so the audit log still has every request.
+  Such a start record is marked as forwarded under a cached decision, and the server records it as forwarded whatever the session's state when it arrives; the rejection of starts after a session ends (below) applies only to starts waiting for a decision.
   Cached decisions never cover a write, a push or a model request; they expire at their TTL, `PolicyUpdate` drops them, and while the worker or server is unreachable they are honoured only until their TTL ends (ADR-0003).
 - The decision for a push carries the data ADR-0012's push checks need at that moment: the commit identity and its chosen address, the key fingerprints the server recorded for the session and has not deleted, the identity's long-lived key fingerprint where the fallback applies, and the user to credit.
   The server's address recheck before each push is part of that decision, so a failed recheck is a denial.
@@ -136,6 +139,7 @@ The terms differ by vendor:
 **Journal.**
 
 - The worker creates the journal with `O_NOFOLLOW` and `O_EXCL` in a root-owned per-session directory and passes the process a write-only, append-only descriptor; `RLIMIT_FSIZE` holds it to its size cap in the kernel, whatever the process does.
+- The journal lets an honest process's records survive its own crash and a worker outage; a compromised process can rewrite or omit its own records, as it can misreport anything else (above).
 - Records in the journal are length-prefixed and checksummed frames.
   The worker parses the journal as untrusted input with the same checks as channel messages, stops at the first frame that fails them, raises an audit event, and leaves every request after that point to the server's rule for start records without end records (below).
 - The process reads a request from a guest connection only after reserving journal space for one record about it, which becomes either its denial or its end record, so every request it has read can always be recorded.
@@ -157,7 +161,8 @@ The terms differ by vendor:
   - The worker then reads the journal and resends the end records the server has not acknowledged.
   On any failed check, and for any proxy scope whose entries are missing, the worker stops the process and starts a new one, as after a crash (below).
 - The process sees end of file on the channel only when no copy of the worker's end is left, for example after the store was lost.
-  It then stops accepting connections and reading requests, lets forwarded requests finish within the drain bound from `Init`, writes their end records, zeroes its secrets and exits.
+  The store keeps the channel open even when the worker has stopped for good, so the worker also sends `Heartbeat` at an interval well inside the liveness bound from `Init`, and the process treats a channel silent for longer than that bound as end of file; the bound is set longer than a worker restart or upgrade takes, so those do not cut streams.
+  On end of file the process stops accepting connections and reading requests, lets forwarded requests finish within the drain bound from `Init`, writes their end records, zeroes its secrets and exits.
 - If the process exits, the session's egress stops, because nftables still redirects only to it (fail-closed).
   The worker restarts it with the session's secrets and the remaining lease, after collecting its journal.
   The server counts the full reservation of every request that has a start record and no end record as spent, so a crash can over-count spend but never under-count it, and every such request still has its start record in the audit log.
@@ -169,11 +174,14 @@ The terms differ by vendor:
   It has a lease from a per-tenant system budget, and the same message set, budget rules and journal, with the server as the high side.
 - It applies the same non-dumpable setting, Landlock ruleset, seccomp filter and secret memory as the session process.
   In place of the spawn helper, its unit gives it an empty read-only root with only the binary (`TemporaryFileSystem=/`), `PrivateDevices`, `ProtectProc=invisible`, `MemoryMax`, `TasksMax` and `LimitCORE=0`, and host nftables output rules for its user drop the same address ranges as the session chain and allow TCP 443 only, plus declared private upstreams.
-- A Java process cannot hand a socket pair to a process it did not start, so the gateway listens on a Unix socket in a directory only the server's user can open, accepts one connection at a time, and accepts it only if `SO_PEERCRED` reports the server's user; on a connected socket, unlike a socket pair, `SO_PEERCRED` reports the peer.
+- A Java process cannot hand a socket pair to a process it did not start, so the channel is a Unix stream socket that a systemd socket unit creates, owned by the server's user with mode 0600, and passes to the gateway as a listening descriptor; accepting on it needs neither `socket()` nor filesystem access, so the seccomp filter and Landlock ruleset still apply.
+  The gateway accepts one connection at a time, and only if `SO_PEERCRED` reports the server's user; on a connected socket, unlike a socket pair, `SO_PEERCRED` reports the peer.
   Java's Unix-domain channels are stream sockets, so messages are length-prefixed; a server restart closes the connection, and the next one starts with `Resync` and `Hello` as a re-adoption does.
   While no server is connected the gateway forwards no new request; requests in flight finish and write their end records to the journal.
-- The server sends model requests to a second Unix socket in the same directory.
-- In the Compose deployment (ADR-0019) the gateway is its own container: a non-root user, a read-only root filesystem, every capability dropped, the same seccomp filter as a Docker seccomp profile, memory and process limits, and a network with internet egress only, not the network that reaches Postgres, OpenBao or MinIO; its two sockets are on a volume shared only with the server container.
+- The server sends model requests to a second socket created and passed the same way, on which the gateway applies the same `SO_PEERCRED` check.
+- In the Compose deployment (ADR-0019) the gateway is its own container: a non-root user, a read-only root filesystem, every capability dropped, the same seccomp filter as a Docker seccomp profile, memory and process limits, and its own network, not the one that reaches Postgres, OpenBao or MinIO.
+  A separate network does not stop traffic to the host's addresses or to ports published on them, so the deployment adds host firewall rules for that network: in Docker's `DOCKER-USER` chain, drop its forwarded traffic to every non-global range and to the host's addresses, and in the host's input chain, drop everything from it; the Compose documentation ships these rules, and without them the gateway's network is not confined.
+  Without systemd, the gateway creates its two sockets itself before it applies Landlock and seccomp, on a volume mounted only in the gateway and server containers, and keeps the `SO_PEERCRED` check.
 
 **Subscription mode (opt-in, single-subscriber deployments only, COST-3).**
 
