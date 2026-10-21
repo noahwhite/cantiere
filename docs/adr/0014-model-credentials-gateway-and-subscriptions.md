@@ -58,14 +58,19 @@ The terms differ by vendor:
 - The worker keeps its own end of each socket in systemd's file descriptor store for the worker service (`FileDescriptorStoreMax`), so the socket stays open across `systemctl restart`, an upgrade or a crash and restart; on start the worker takes each socket back and re-adopts the running proxy through it (OBS-1).
   After a full stop the store is emptied, so on start the worker stops each proxy it cannot re-adopt and starts a new one, as after a proxy crash (below).
 - Every request that injects a credential, which includes every model request, is recorded before it is forwarded.
-  The process sends a start record (a request ID it generates, the session, the destination and, for a model request, the model and its reservation) and forwards the request only after the server has stored the record and acknowledged it through the worker.
-  When the request ends, it sends an end record with the same request ID (status and, for a model request, the usage and cost), keeps it until the server acknowledges it and resends it after a reconnect; the server ignores a second end record for the same request ID.
-  The worker scrubs and relays both records to the server as before (ADR-0010, ADR-0015); denials are sent the same way.
+  The process sends a start record (a random 128-bit request ID, the session, the destination and, for a model request, the model and its reservation) and forwards the request only after the server has stored the record and accepted it through the worker.
+  The server accepts a start only while the session is running and its lease covers the reservation, and rejects it otherwise, so a session that ended while the worker was down cannot start a model call after reconnecting.
+  Start records are idempotent by request ID: the process resends an unanswered start after a reconnect and the server returns its first decision.
+  If the caller has gone away before the decision arrives, the process sends an end record marked not forwarded, which releases the reservation.
+- When a request ends, the process appends an end record with the same request ID (status and, for a model request, the usage and cost) to a per-session journal file, then sends it; the worker reads the journal when it adopts or restarts the process and resends what the server has not acknowledged, and the server ignores a second end record for the same request ID.
+  The journal holds only request IDs, statuses, usage and cost, never secrets or request or response bodies, and the worker deletes it when the session's records are all acknowledged.
+  The worker scrubs and relays both records to the server as before (ADR-0010, ADR-0015).
+- Denials are sent the same way without a start record.
+  While the worker is unreachable the process keeps up to a fixed number of denial records in memory; beyond that it keeps one counter per denied destination, sent as a summary record with the first and last time on reconnect, so a guest cannot exhaust its memory and no denial goes uncounted.
 - The process runs in its own systemd scope outside the worker's cgroup, like the session's VM (ADR-0003), so restarting or upgrading the worker does not cut in-flight model streams.
-  While the worker or the server is unreachable, no start record can be acknowledged, so the process forwards no new credentialed request; a session ended during that time cannot start new model calls.
-  Streams already in flight finish, and their end records wait in memory; there is at most one per open request, so the buffer is bounded by the number of open requests.
+  While the worker or the server is unreachable, no start record can be accepted, so the process forwards no new credentialed request; streams already in flight finish and write their end records to the journal.
 - If the process exits, the session's egress stops, because nftables still redirects only to it (fail-closed).
-  The worker restarts it with the session's secrets and the remaining lease.
+  The worker restarts it with the session's secrets and the remaining lease, after collecting its journal.
   The server counts the full reservation of every request that has a start record and no end record as spent, so a crash can over-count spend but never under-count it, and every such request still has its start record in the audit log.
 - Model calls the server makes itself, outside any session (KN-2, KN-3, KN-4), go through the same binary run beside the server in gateway-only mode, with a lease from a per-tenant system budget; the server passes it keys over a Unix socket in the same way.
 - The usage parsers, pricing, reservation logic and passthrough proxy are separate crates that do not depend on Cantiere's session types, so the gateway can be released on its own later without a rewrite.
@@ -95,7 +100,7 @@ The terms differ by vendor:
 
 - API-key sessions get hard budget enforcement outside the sandbox, at the cost of rejecting a request near the cap whose worst case does not fit even if its real cost would; subscription sessions get best-effort enforcement only (the adapter interrupts at the cap, the gateway cannot).
 - A bug in the code that parses sandbox-controlled TLS, HTTP, GraphQL or model streams reaches one session's proxy process, that session's secrets and its remaining lease, not the worker's host privileges or other sessions.
-- The worker and the proxy process need a small protocol for secrets, lease top-ups and start and end records, and each session costs one more process of a few MB.
+- The worker and the proxy process need a small protocol for secrets, lease top-ups and start and end records, plus a per-session journal file for end records, and each session costs one more process of a few MB.
 - Every credentialed request waits for one round trip to the server before it is forwarded, and stops being forwarded while the worker or server is unreachable; model calls already in flight are not affected.
 - Cantiere maintains the gateway itself: each provider's usage format, including streamed and cache-token usage, and the price table must track provider changes.
   Because requests are not translated, a new provider parameter or beta header needs no gateway change unless it changes how usage is reported.
