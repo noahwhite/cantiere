@@ -13,7 +13,7 @@ Actions on those paths are not decided here, and only the SSH agent's commit sig
 
 ## Decision
 
-- **Policy decision point:** a single `policy.Decide(action, session, persona, context)` in the server, called by the worker's proxies (ADR-0010) and by server-side actions before execution. Workers cache decisions for low-risk, high-rate actions (for example `GET` to an allowed API) per session.
+- **Policy decision point:** a single `policy.Decide(action, session, persona, context)` in the server, called by the worker's proxies (ADR-0010), which run in each session's proxy process and reach it through the worker (ADR-0014), and by server-side actions before execution. The proxy process caches decisions the server marks cacheable for low-risk, high-rate actions (for example `GET` to an allowed API) per session.
 - **Rules as data:** persona definitions in the config repo (ADR-0017) declare allowed actions, repos, branches, GitHub permissions, egress domains and budget; the engine evaluates those declarations plus fixed platform invariants. Phase 1 implements rules in Java in the server over the persona schema; workers only cache decisions and never evaluate rules, so no second implementation exists. A general policy language (Cedar or OPA) is deferred until a second rule author exists.
 - **Fixed invariants** that no persona can override:
   - push only to the session's own branch (SB-5);
