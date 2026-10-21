@@ -47,7 +47,11 @@ The terms differ by vendor:
     The bound is priced at the highest input price the request can trigger: a cache write at the longest duration it asks for, and a long-context tier once the bound crosses that tier's threshold.
   - Modalities: each model's price entry lists the input and output modalities it accepts, each with its price; a request that sends or asks for a modality its model's entry does not list is refused, so an image or document is never reserved at a text price the provider does not charge for it.
     The first release accepts text, images and documents as input and text as output, and refuses audio and video; no supported runtime sends them today, although opencode is expected to once its pending audio and video attachment fix ships.
-    A later release can accept them under this decision: the input bound reads each clip's duration from its container header and multiplies it by the provider's published tokens per second for that modality, media whose duration cannot be read is refused, and an output limit is priced at the audio output price when the request asks for audio output.
+    A later release can accept them only with a bound that rests on nothing the guest asserts.
+    The gateway measures each clip's duration by decoding it rather than reading its header.
+    It fixes or refuses the request options that change the provider's token rate, such as frame rate, resolution and provider-run processing.
+    It reserves at the provider's highest rate for the settings that remain, and prices an output limit at the audio output price when the request asks for audio output.
+    A mode with no such bound stays refused.
   - Output: the request's output limit (`max_tokens`, `max_output_tokens` or `max_completion_tokens`), or the model's maximum output from the price table when the request sets none; a request without a limit for a model with no maximum output entry is refused.
     A choice count (`n`) multiplies the output bound.
   - Provider-run tools, such as web search, are allowed only when the price table prices them and the request caps their use (for example Anthropic's `max_uses`); the reservation includes that cap, and any other provider-run tool is refused.
