@@ -124,7 +124,7 @@ To be numbered on acceptance, in the Cost section of requirements.md, priority S
 
 Adopted with it, COST-2's exception clause gains the cases this draft cannot cap:
 
-> ... or, through an upstream gateway (ADR-NNNN), a model the upstream does not report truthfully, an undeclared failover that ends in an error with no model signal, or a release mapping that matches an error returned after a model call (at most one reservation per session).
+> ... or, through an upstream gateway (ADR-NNNN), a model the upstream does not report truthfully, a model the upstream truthfully reports that is neither the requested model nor a declared fallback (detected and paused, but billed at its own price first), an undeclared failover that ends in an error with no model signal, or a release mapping that matches an error returned after a model call (at most one reservation each time the session is paused, which a person must resume).
 
 ## Validation checks
 
