@@ -1,13 +1,15 @@
-# ADR-0014: Model access goes through a worker-side gateway; subscription logins stay the user's own
+# ADR-0014: Model access goes through a per-session gateway process on the worker; subscription logins stay the user's own
 
 - Status: Accepted
 - Date: 2026-10-07
-- Requirements: COST-1, COST-2, COST-3, RT-3, ID-2; open question "Do Claude Code and Codex subscription terms allow headless use from a self-hosted multi-session server?"; Phase 0 item "test broker-held subscription credentials"
+- Updated: 2026-10-21 - the gateway runs in a per-session unprivileged proxy process, and the build-vs-reuse evaluation of existing gateways is recorded
+- Requirements: COST-1, COST-2, COST-3, RT-3, ID-2, ID-4, OBS-1, KN-2; open question "Do Claude Code and Codex subscription terms allow headless use from a self-hosted multi-session server?"; Phase 0 item "test broker-held subscription credentials"
 
 ## Context
 
 Cantiere does not resell or proxy model access as a service; each user brings their own credentials (README).
 Model spend must be metered per session and hard-capped (COST-1, COST-2), and denied models must be unreachable (RT-3).
+The gateway parses requests and response streams that the sandbox controls, and the worker that would otherwise host it is the most sensitive component on a host (ADR-0010).
 
 The terms differ by vendor:
 
@@ -31,12 +33,34 @@ The terms differ by vendor:
   budget: {session_usd: 5}
   ```
 
-- The gateway runs on the worker per session and does four things:
+- The gateway does four things:
   - injects the real key (Anthropic, OpenAI, Bedrock, Vertex, or any OpenAI-compatible endpoint such as DeepSeek, Moonshot, OpenRouter or a local vLLM);
   - rejects requests for denied models (RT-3);
   - reads token usage from responses and prices it from a per-model price table (input, output, cache read and cache write per million tokens) kept in the config repo (ADR-0017), producing authoritative `cost` events (COST-1); a model with no price entry is refused, so API-key spend is never unmetered;
   - enforces budgets with reservations (COST-2): the server grants each session a budget lease from an atomic per-tenant daily counter in Postgres; before forwarding a request the gateway reserves its worst-case cost (input tokens plus `max_tokens` output, at table prices) from the lease, refuses the request if the reservation does not fit, and releases the unused part when the response's usage is known. When the lease and the daily counter are spent the session pauses to the inbox. Spend can therefore never exceed the cap, except by provider-side usage the response does not report, which is reconciled on the next request.
+- The gateway forwards each provider's own API (Anthropic Messages, OpenAI Chat Completions and Responses, Bedrock, Vertex, OpenAI-compatible endpoints) without translating it.
+  Apart from swapping the placeholder for the real credential and choosing the upstream, request and response bytes pass through unchanged, including unknown fields and `anthropic-beta` headers.
+  Streams are relayed as they arrive; usage is read from the stream while relaying it, not by buffering it.
+- A budget refusal gets its own error type, `cantiere_budget_exceeded`, with a status the runtime does not retry, and the adapter pauses the session to the inbox on it; conformance test 9 (architecture.md) pins the status each runtime treats as final.
+- The price table in the config repo may be seeded from LiteLLM's MIT-licensed `model_prices_and_context_window.json`, credited in `NOTICE`; config-repo entries always win, and the missing-price rule above is unchanged.
 - Keys belong to the deployment or to individual users; per-user keys are used only for that user's sessions.
+
+**Where the gateway runs: a per-session proxy process.**
+
+- For each session the worker starts one proxy process, `cantiere-worker proxy`, a subcommand of the same static binary (ADR-0019), inside the session's network namespace.
+  That process hosts the model gateway together with the session's egress proxy (ADR-0011) and git proxy (ADR-0010), so the choke point those decisions share stays one process.
+- The process runs as a per-session unprivileged user with no capabilities, under a seccomp filter, with no access to `/dev/kvm`, the jailer, nftables, the worker's gRPC stream or other sessions.
+  The worker creates its listening sockets in the namespace and passes them in, so it needs no privilege to bind ports 80 and 443.
+- The worker sends the process only that session's secret values, the per-session CA key and the budget lease, over a Unix socket inherited at start, using the protobuf contracts of ADR-0004.
+  Values stay in the process's memory, never on disk, in argv or in its environment (ID-4).
+  Lease top-ups arrive on the same socket.
+- The process sends cost events, denials and audit records back over that socket; the worker scrubs and relays them to the server as before (ADR-0010, ADR-0015).
+- The process runs in its own systemd scope outside the worker's cgroup, like the session's VM (ADR-0003), so restarting or upgrading the worker does not cut in-flight model streams; on start the worker re-adopts each running proxy through its socket (OBS-1).
+- If the process exits, the session's egress stops, because nftables still redirects only to it (fail-closed).
+  The worker restarts it with the session's secrets and remaining lease.
+  Reservations the dead process held are counted as spent, so a crash can over-count spend but never under-count it.
+- Model calls the server makes itself, outside any session (KN-2, KN-3, KN-4), go through the same binary run beside the server in gateway-only mode, with a lease from a per-tenant system budget; the server passes it keys over a Unix socket in the same way.
+- The usage parsers, pricing, reservation logic and passthrough proxy are separate crates that do not depend on Cantiere's session types, so the gateway can be released on its own later without a rewrite.
 
 **Subscription mode (opt-in, single-subscriber deployments only, COST-3).**
 
@@ -62,6 +86,10 @@ The terms differ by vendor:
 ## Consequences
 
 - API-key sessions get hard budget enforcement outside the sandbox, at the cost of rejecting a request near the cap whose worst case does not fit even if its real cost would; subscription sessions get best-effort enforcement only (the adapter interrupts at the cap, the gateway cannot).
+- A bug in the code that parses sandbox-controlled TLS, HTTP, GraphQL or model streams reaches one session's proxy process, that session's secrets and its remaining lease, not the worker's host privileges or other sessions.
+- The worker and the proxy process need a small protocol for secrets, lease top-ups and returned events, and each session costs one more process of a few MB.
+- Cantiere maintains the gateway itself: each provider's usage format, including streamed and cache-token usage, and the price table must track provider changes.
+  Because requests are not translated, a new provider parameter or beta header needs no gateway change unless it changes how usage is reported.
 - A subscription token in a compromised sandbox is exposed for its lifetime (up to a year for `setup-token`), or until the subscriber removes it in their Claude account settings. The token is in the `claude` process environment, so anything that runs in the guest, including the agent's own shell commands and code from the target repository, can read it; turning off project settings and repository MCP servers (above) removes only the paths that run before the first turn. Mitigations are egress allowlisting (ADR-0011), the git proxy's secret scan (ADR-0010), and the single-subscriber restriction. The scrubber catches only literal and known-pattern copies, not encoded ones.
 - `pass` domains, including subscription endpoints, are opaque to the proxy, so guest code can send data there with credentials of its own (ADR-0011). Each `pass` entry is an operator-accepted exfiltration channel and is listed in the approval diff.
 - Subscription sessions do not load the target repository's Claude Code settings, hooks or `.mcp.json`; a repository that relies on them needs the equivalent in the org layer of the blueprint (ADR-0008).
@@ -78,3 +106,14 @@ The terms differ by vendor:
   - Provider keys would sit as literal values in Aperture's config instead of the secret store (ADR-0010).
   Aperture behind the worker's gateway, as one more upstream provider for deployments that already run it, is not covered by this decision.
   It would keep metering and budgets on the worker, but needs the worker itself on the tailnet; adding it takes a superseding ADR.
+- **Gateway inside the worker process:** one process fewer and no worker-to-proxy protocol, but the code that parses sandbox-controlled traffic would run as root beside KVM, the jailer, nftables and every session's secrets.
+- **Self-hosted open-source gateways** (evaluated 2026-10-21 against the gateway's required behaviour: unchanged passthrough, keys from OpenBao, per-session keys, reservation before forwarding, per-request cost, audit).
+  None meets it in its free edition, and two requirements fail almost everywhere: reading provider keys from OpenBao without a restart, and an audit log, both either paid or missing.
+  - [LiteLLM](https://github.com/BerriAI/litellm) `v1.106.1` (MIT, Python): reserves worst-case cost before forwarding when `fail_closed_budget_enforcement` is set, but its Vault integration and audit log need an enterprise licence; it caches keys for 60 s per worker process, so a deleted key keeps working on other workers; its unchanged-passthrough routes use one gateway-wide key resolved at load, so rotating it needs a restart; and its official image bundles the commercially licensed `enterprise/` code.
+    It had a PyPI supply-chain compromise (`1.82.7`, `1.82.8`) and three CVEs in 2026.
+  - [Bifrost](https://github.com/maximhq/bifrost) `transports/v2.3.2` (Apache-2.0, Go): Vault support and audit log are enterprise-only, and budgets are charged after the response with no reservation.
+  - [agentgateway](https://github.com/agentgateway/agentgateway) `v1.6.0` (Apache-2.0, Rust, Linux Foundation): the best data plane of the set (unchanged passthrough, unbuffered streams, signed images, Postgres only), but budgets are charged after the response, there is no OpenBao client or audit log, and counters flush every 5 s.
+    Combining it with a Cantiere budget service behind its external-authorization hook and OpenBao Agent was the closest composition and is rejected because OpenBao Agent writes keys to files (against ADR-0010), it adds three processes per deployment, the authorization hook sees only the first 8 KB of a request body by default, and settlement would come from asynchronous logs.
+    It remains the fallback if this decision fails conformance test 9.
+  - [Otari](https://github.com/mozilla-ai/otari) `v0.30.1` (Apache-2.0, Python): reserves worst-case cost in one atomic update and refuses unpriced models by default, which this decision's reservation follows, but it reads provider keys only from the environment at start, rebuilds requests through provider SDKs, and runs its own tools outside the session sandbox.
+  - Agent Router (formerly Envoy AI Gateway) `v1.2.0`, Apache APISIX `3.19.0`, Kong Gateway OSS `3.9`, Portkey Gateway OSS, GoModel, Higress, TensorZero and Helicone's gateway fail more of it: paid secret-store support, no dollar budgets or per-caller keys in the free edition, Kubernetes-only production support, archived, or relicensed with a hosted-control-plane dependency.
