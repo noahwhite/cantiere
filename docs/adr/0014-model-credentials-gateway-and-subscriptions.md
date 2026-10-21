@@ -60,13 +60,13 @@ The terms differ by vendor:
 - Every request that injects a credential, which includes every model request, is recorded before it is forwarded.
   The process sends a start record (a random 128-bit request ID, the session, the destination and, for a model request, the model and its reservation) and forwards the request only after the server has stored the record and accepted it through the worker.
   The server accepts a start only while the session is running and its lease covers the reservation, and rejects it otherwise, so a session that ended while the worker was down cannot start a model call after reconnecting.
-  Start records are idempotent by request ID: the process resends an unanswered start after a reconnect and the server returns its first decision.
+  Start records are idempotent by request ID: the process resends an unanswered start after a reconnect, and the server returns its first decision only while the session is still running; once the session has ended it rejects every start, including a resend of one it had accepted, and records that request as not forwarded.
   If the caller has gone away before the decision arrives, the process sends an end record marked not forwarded, which releases the reservation.
 - When a request ends, the process appends an end record with the same request ID (status and, for a model request, the usage and cost) to a per-session journal file, then sends it; the worker reads the journal when it adopts or restarts the process and resends what the server has not acknowledged, and the server ignores a second end record for the same request ID.
-  The journal holds only request IDs, statuses, usage and cost, never secrets or request or response bodies, and the worker deletes it when the session's records are all acknowledged.
+  The journal holds only request IDs, statuses, usage, cost and denial details, never secrets or request or response bodies, and the worker deletes it when the session's records are all acknowledged.
   The worker scrubs and relays both records to the server as before (ADR-0010, ADR-0015).
-- Denials are sent the same way without a start record.
-  While the worker is unreachable the process keeps up to a fixed number of denial records in memory; beyond that it keeps one counter per denied destination, sent as a summary record with the first and last time on reconnect, so a guest cannot exhaust its memory and no denial goes uncounted.
+- Each denial is an individual record, written to the same journal and sent the same way, without a start record (ADR-0011, SEC-2).
+  The journal has a fixed size cap; when it is full the process stops accepting new connections from the guest until the worker has drained it, so a guest cannot exhaust the process's memory or disk during a worker outage, and no denial is summarised or dropped.
 - The process runs in its own systemd scope outside the worker's cgroup, like the session's VM (ADR-0003), so restarting or upgrading the worker does not cut in-flight model streams.
   While the worker or the server is unreachable, no start record can be accepted, so the process forwards no new credentialed request; streams already in flight finish and write their end records to the journal.
 - If the process exits, the session's egress stops, because nftables still redirects only to it (fail-closed).
