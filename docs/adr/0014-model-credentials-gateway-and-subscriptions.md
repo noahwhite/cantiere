@@ -41,7 +41,8 @@ The terms differ by vendor:
 - The gateway forwards each provider's own API (Anthropic Messages, OpenAI Chat Completions and Responses, Bedrock, Vertex, OpenAI-compatible endpoints) without translating it.
   Apart from swapping the placeholder for the real credential and choosing the upstream, request and response bytes pass through unchanged, including unknown fields and `anthropic-beta` headers.
   Streams are relayed as they arrive; usage is read from the stream while relaying it, not by buffering it.
-- A budget refusal gets its own error type, `cantiere_budget_exceeded`, with a status the runtime does not retry, and the adapter pauses the session to the inbox on it; conformance test 9 (architecture.md) pins the status each runtime treats as final.
+- A budget refusal gets its own error type, `cantiere_budget_exceeded`, and one HTTP status that no supported runtime retries; the adapter pauses the session to the inbox on it.
+  Conformance test 9 (architecture.md) pins that status and checks, for Claude Code and for each ACP agent before it is enabled for API-key sessions, that the refusal is not retried.
 - The price table in the config repo may be seeded from LiteLLM's MIT-licensed `model_prices_and_context_window.json`, credited in `NOTICE`; config-repo entries always win, and the missing-price rule above is unchanged.
 - Keys belong to the deployment or to individual users; per-user keys are used only for that user's sessions.
 
@@ -51,11 +52,16 @@ The terms differ by vendor:
   That process hosts the model gateway together with the session's egress proxy (ADR-0011) and git proxy (ADR-0010), so the choke point those decisions share stays one process.
 - The process runs as a per-session unprivileged user with no capabilities, under a seccomp filter, with no access to `/dev/kvm`, the jailer, nftables, the worker's gRPC stream or other sessions.
   The worker creates its listening sockets in the namespace and passes them in, so it needs no privilege to bind ports 80 and 443.
-- The worker sends the process only that session's secret values, the per-session CA key and the budget lease, over a Unix socket inherited at start, using the protobuf contracts of ADR-0004.
+- The worker sends the process only that session's secret values, the per-session CA key and the budget lease, over one end of a Unix socket pair created at start, using the protobuf contracts of ADR-0004.
+  The worker hands its own end to systemd's file descriptor store for the worker service (`FileDescriptorStoreMax`, `FileDescriptorStorePreserve=yes`), so the socket stays open while the worker restarts, crashes or is upgraded.
   Values stay in the process's memory, never on disk, in argv or in its environment (ID-4).
   Lease top-ups arrive on the same socket.
-- The process sends cost events, denials and audit records back over that socket; the worker scrubs and relays them to the server as before (ADR-0010, ADR-0015).
-- The process runs in its own systemd scope outside the worker's cgroup, like the session's VM (ADR-0003), so restarting or upgrading the worker does not cut in-flight model streams; on start the worker re-adopts each running proxy through its socket (OBS-1).
+- The process sends cost events, denials and audit records back over that socket, each with a sequence number; the worker scrubs and relays them to the server as before (ADR-0010, ADR-0015), and acknowledges each once the server has it.
+  The process keeps every unacknowledged record and resends it after a reconnect, and the server drops duplicates by sequence number, so a worker restart loses or double-counts nothing.
+  If its buffer of unacknowledged records fills, the process refuses new requests rather than drop a record.
+- The process runs in its own systemd scope outside the worker's cgroup, like the session's VM (ADR-0003), so restarting or upgrading the worker does not cut in-flight model streams.
+  While the worker is down the process keeps serving from the lease it holds and gets no top-ups, so it fails closed when the lease runs out.
+  On start the worker takes each session's socket back from the file descriptor store, re-adopts the running proxy through it and collects the resent records (OBS-1).
 - If the process exits, the session's egress stops, because nftables still redirects only to it (fail-closed).
   The worker restarts it with the session's secrets and remaining lease.
   Reservations the dead process held are counted as spent, so a crash can over-count spend but never under-count it.
@@ -109,11 +115,11 @@ The terms differ by vendor:
 - **Gateway inside the worker process:** one process fewer and no worker-to-proxy protocol, but the code that parses sandbox-controlled traffic would run as root beside KVM, the jailer, nftables and every session's secrets.
 - **Self-hosted open-source gateways** (evaluated 2026-10-21 against the gateway's required behaviour: unchanged passthrough, keys from OpenBao, per-session keys, reservation before forwarding, per-request cost, audit).
   None meets it in its free edition, and two requirements fail almost everywhere: reading provider keys from OpenBao without a restart, and an audit log, both either paid or missing.
-  - [LiteLLM](https://github.com/BerriAI/litellm) `v1.106.1` (MIT, Python): reserves worst-case cost before forwarding when `fail_closed_budget_enforcement` is set, but its Vault integration and audit log need an enterprise licence; it caches keys for 60 s per worker process, so a deleted key keeps working on other workers; its unchanged-passthrough routes use one gateway-wide key resolved at load, so rotating it needs a restart; and its official image bundles the commercially licensed `enterprise/` code.
+  - [LiteLLM](https://github.com/BerriAI/litellm) `v1.106.1` (MIT, Python): reserves worst-case cost before forwarding by default, and `fail_closed_budget_enforcement` makes it refuse requests when spend cannot be checked, but its Vault integration and audit log need an enterprise licence; it caches keys for 60 s per worker process, so a deleted key keeps working on other workers; its unchanged-passthrough routes use one gateway-wide key resolved at load, so rotating it needs a restart; and its official image bundles the commercially licensed `enterprise/` code.
     It had a PyPI supply-chain compromise (`1.82.7`, `1.82.8`) and three CVEs in 2026.
   - [Bifrost](https://github.com/maximhq/bifrost) `transports/v2.3.2` (Apache-2.0, Go): Vault support and audit log are enterprise-only, and budgets are charged after the response with no reservation.
   - [agentgateway](https://github.com/agentgateway/agentgateway) `v1.6.0` (Apache-2.0, Rust, Linux Foundation): the best data plane of the set (unchanged passthrough, unbuffered streams, signed images, Postgres only), but budgets are charged after the response, there is no OpenBao client or audit log, and counters flush every 5 s.
-    Combining it with a Cantiere budget service behind its external-authorization hook and OpenBao Agent was the closest composition and is rejected because OpenBao Agent writes keys to files (against ADR-0010), it adds three processes per deployment, the authorization hook sees only the first 8 KB of a request body by default, and settlement would come from asynchronous logs.
+    Combining it with a Cantiere budget service behind its external-authorization hook and OpenBao Agent was the closest composition and is rejected because agentgateway reads provider keys only inline from config or from files, so OpenBao Agent would have to render them to files (against ADR-0010), it adds three processes per deployment, the authorization hook sees only the first 8 KB of a request body by default, and settlement would come from asynchronous logs.
     It remains the fallback if this decision fails conformance test 9.
   - [Otari](https://github.com/mozilla-ai/otari) `v0.30.1` (Apache-2.0, Python): reserves worst-case cost in one atomic update and refuses unpriced models by default, which this decision's reservation follows, but it reads provider keys only from the environment at start, rebuilds requests through provider SDKs, and runs its own tools outside the session sandbox.
   - Agent Router (formerly Envoy AI Gateway) `v1.2.0`, Apache APISIX `3.19.0`, Kong Gateway OSS `3.9`, Portkey Gateway OSS, GoModel, Higress, TensorZero and Helicone's gateway fail more of it: paid secret-store support, no dollar budgets or per-caller keys in the free edition, Kubernetes-only production support, archived, or relicensed with a hosted-control-plane dependency.
