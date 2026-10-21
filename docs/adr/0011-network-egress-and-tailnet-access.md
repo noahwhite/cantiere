@@ -20,7 +20,7 @@ Credential injection (ADR-0010) and model metering (ADR-0014) need the same chok
 
 **Resolver.** The worker answers DNS only for names on the session's allowlist and returns `NXDOMAIN` for the rest, which closes DNS-tunnel exfiltration and gives an early, logged denial.
 
-**Egress proxy** (Rust, part of `cantiere-worker`, transparent):
+**Egress proxy** (Rust, part of `cantiere-worker`, transparent; it runs in the session's unprivileged proxy process with the git proxy and model gateway, ADR-0014):
 
 - Reads SNI (TLS) or `Host` (HTTP) and matches it against the session's allowlist: the org blueprint layer's `egress` list, the persona's list, and the repo-layer entries an operator has approved for that repo (ADR-0008).
 - Each allowed domain has one mode:

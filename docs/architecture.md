@@ -41,9 +41,11 @@ flowchart TB
         build[Blueprint builder + templates]
         subgraph netns["per-session network namespace"]
             dns[Allowlist resolver]
-            proxy[Egress proxy - pass / inspect / inject]
-            gitp[Git proxy - own branch only, signature checks]
-            gw[Model gateway - keys, deny list, metering, budget]
+            subgraph sp["session proxy process - unprivileged"]
+                proxy[Egress proxy - pass / inspect / inject]
+                gitp[Git proxy - own branch only, signature checks]
+                gw[Model gateway - keys, deny list, metering, budget]
+            end
             ts[Ephemeral tailscaled]
         end
     end
@@ -79,7 +81,7 @@ flowchart TB
 | Component | Owns | ADRs |
 | --- | --- | --- |
 | `cantiere-server` (Java, Quarkus) | API, UI, session workflows, scheduling, policy, audit, timeline, GitHub App, secret resolution | 0003, 0005, 0006, 0012, 0015, 0016 |
-| `cantiere-worker` (Rust) | VMs, templates, network namespaces, egress and git proxies, commit signing agent, model gateway, stream relay | 0007, 0008, 0010, 0011, 0012, 0013, 0014 |
+| `cantiere-worker` (Rust) | VMs, templates, network namespaces, per-session proxy processes (egress proxy, git proxy, model gateway), commit signing agent, stream relay | 0007, 0008, 0010, 0011, 0012, 0013, 0014 |
 | `cantiere-guest` (Rust) | Runtime adapters (Claude Code native, ACP), event normalization, slash-command discovery, PTYs, editor and VNC tunnels, git identity and signing setup | 0009, 0012, 0013 |
 | Config repo | Personas, org blueprint layer, skills reference, workflows later | 0017 |
 | Target repos | `.agent/blueprint.yaml`, `CLAUDE.md` / `AGENTS.md` | 0008, 0009 |
@@ -123,7 +125,8 @@ sequenceDiagram
 | Boundary | What crosses it | Control |
 | --- | --- | --- |
 | Guest to worker | vsock streams; TAP traffic for DNS, 80/443 and declared tailnet | Firecracker + jailer; nftables default drop in a namespace the guest cannot see (ADR-0007, ADR-0011) |
-| Worker to internet | Proxied requests with injected credentials | Allowlist resolver, SNI/Host allowlist, method/path policy, git branch rule, audit (ADR-0010, ADR-0011, ADR-0015) |
+| Worker to session proxy process | That session's secrets, CA key and budget lease; start and end records of credentialed requests and denials back | Socket pair created by the worker, no tokens; worker pushes, process only reports a closed set of records, each validated as untrusted; per-session unprivileged user, no capabilities, seccomp, own systemd scope; values in memory only (ADR-0010, ADR-0014) |
+| Session proxy process to internet | Proxied requests with injected credentials | No path to the server, OpenBao, Postgres, object store, host or metadata address (ADR-0014); allowlist resolver, SNI/Host allowlist, method/path policy, git branch rule, audit (ADR-0010, ADR-0011, ADR-0015) |
 | Worker to server | One outbound authenticated gRPC stream | Per-worker credential, revocable; secrets only per session in memory (ADR-0003) |
 | Browser to server | HTTPS, WebSocket | Passkey or OIDC session, PATs for CLI (ADR-0016) |
 | Browser to sandbox content | Editor, terminal and browser view served from the guest | Separate per-session origin with a capability token, no Cantiere cookies, strict CSP (ADR-0013) |
@@ -173,7 +176,7 @@ Each item's pass condition is written in its ADR.
 | 6a | Phase 0 | Subscription auth signals | With the pinned Claude Code version and a `setup-token` in `CLAUDE_CODE_OAUTH_TOKEN`, `claude auth status` reports `authMethod` `oauth_token`; during a working session the token value is unchanged and no credential is written to the CLI's credential store; with the token revoked or expired, the stream-json output's authentication-failure signal is recorded and the adapter pauses the session instead of failing it | 0009, 0014 |
 | 7 | Phase 0 | Headless Claude Code end to end | One Claude Code session takes a prompt to a pushed branch with events streaming, and a user skill dispatched as `/name` runs. The push goes to a throwaway repo with a temporary spike-only credential; it does not validate ADR-0010, which items 8, 10 and 11 do | 0009 |
 | 8 | Phase 1, slice 1 | CA, proxy trust and domain allowlist | Claude Code, `git`, `gh`, Docker pulls, Maven and npm work through the proxy with the per-session CA; non-allowlisted domains are denied and every denial is logged | 0010, 0011 |
-| 9 | Phase 1, slice 1 | Model gateway | Claude Code runs end to end against the gateway with a placeholder key; usage metered and priced from the config-repo price table | 0014 |
+| 9 | Phase 1, slice 1 | Model gateway | Claude Code, and each ACP agent before it is enabled for API-key sessions, runs end to end against the gateway in the unprivileged session proxy process with a placeholder key; requests reach the provider unchanged apart from the credential; usage metered and priced from the config-repo price table; a budget refusal returns HTTP 402 with error type `cantiere_budget_exceeded`, the runtime does not retry it, and the adapter pauses the session to the inbox; a worker restart mid-stream leaves the stream running, its cost is recorded exactly once, and no new model request is forwarded until the worker is back | 0014 |
 | 10 | Phase 1, slice 1 | GitHub API policy | Session token cannot update refs, merge, or mutate other repos via REST or GraphQL | 0010 |
 | 11 | Phase 1, slice 1 | Commit signing | Bot commits signed through the session agent show Verified as the machine user; user commits show Verified as the user, or, if ADR-0012 check 2 fails, user mode falls back to Verified machine-user commits with the user as co-author (GH-8); unsigned commits are refused | 0012 |
 | 12 | Phase 1, slice 1 | Durable step atomicity | A DBOS step that writes a row through the jOOQ step factory and is killed before returning leaves both the row and the checkpoint, or neither | 0006 |
