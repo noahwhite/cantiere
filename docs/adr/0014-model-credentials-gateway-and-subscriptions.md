@@ -41,8 +41,8 @@ The terms differ by vendor:
 - The gateway forwards each provider's own API (Anthropic Messages, OpenAI Chat Completions and Responses, Bedrock, Vertex, OpenAI-compatible endpoints) without translating it.
   Apart from swapping the placeholder for the real credential and choosing the upstream, request and response bytes pass through unchanged, including unknown fields and `anthropic-beta` headers.
   Streams are relayed as they arrive; usage is read from the stream while relaying it, not by buffering it.
-- A budget refusal gets its own error type, `cantiere_budget_exceeded`, and one HTTP status that no supported runtime retries; the adapter pauses the session to the inbox on it.
-  Conformance test 9 (architecture.md) pins that status and checks, for Claude Code and for each ACP agent before it is enabled for API-key sessions, that the refusal is not retried.
+- A budget refusal gets its own error type, `cantiere_budget_exceeded`, with HTTP status 402 and a body in the provider's own error format; the adapter pauses the session to the inbox on it.
+  Conformance test 9 (architecture.md) checks, for Claude Code and for each ACP agent before it is enabled for API-key sessions, that the runtime treats this refusal as final and does not retry it; if a runtime retries 402, the status is changed for all runtimes in a superseding ADR.
 - The price table in the config repo may be seeded from LiteLLM's MIT-licensed `model_prices_and_context_window.json`, credited in `NOTICE`; config-repo entries always win, and the missing-price rule above is unchanged.
 - Keys belong to the deployment or to individual users; per-user keys are used only for that user's sessions.
 
@@ -53,18 +53,20 @@ The terms differ by vendor:
 - The process runs as a per-session unprivileged user with no capabilities, under a seccomp filter, with no access to `/dev/kvm`, the jailer, nftables, the worker's gRPC stream or other sessions.
   The worker creates its listening sockets in the namespace and passes them in, so it needs no privilege to bind ports 80 and 443.
 - The worker sends the process only that session's secret values, the per-session CA key and the budget lease, over one end of a Unix socket pair created at start, using the protobuf contracts of ADR-0004.
-  The worker hands its own end to systemd's file descriptor store for the worker service (`FileDescriptorStoreMax`, `FileDescriptorStorePreserve=yes`), so the socket stays open while the worker restarts, crashes or is upgraded.
   Values stay in the process's memory, never on disk, in argv or in its environment (ID-4).
   Lease top-ups arrive on the same socket.
-- The process sends cost events, denials and audit records back over that socket, each with a sequence number; the worker scrubs and relays them to the server as before (ADR-0010, ADR-0015), and acknowledges each once the server has it.
-  The process keeps every unacknowledged record and resends it after a reconnect, and the server drops duplicates by sequence number, so a worker restart loses or double-counts nothing.
-  If its buffer of unacknowledged records fills, the process refuses new requests rather than drop a record.
+- The worker keeps its own end of each socket in systemd's file descriptor store for the worker service (`FileDescriptorStoreMax`), so the socket stays open across `systemctl restart`, an upgrade or a crash and restart; on start the worker takes each socket back and re-adopts the running proxy through it (OBS-1).
+  After a full stop the store is emptied, so on start the worker stops each proxy it cannot re-adopt and starts a new one, as after a proxy crash (below).
+- Every request that injects a credential, which includes every model request, is recorded before it is forwarded.
+  The process sends a start record (a request ID it generates, the session, the destination and, for a model request, the model and its reservation) and forwards the request only after the server has stored the record and acknowledged it through the worker.
+  When the request ends, it sends an end record with the same request ID (status and, for a model request, the usage and cost), keeps it until the server acknowledges it and resends it after a reconnect; the server ignores a second end record for the same request ID.
+  The worker scrubs and relays both records to the server as before (ADR-0010, ADR-0015); denials are sent the same way.
 - The process runs in its own systemd scope outside the worker's cgroup, like the session's VM (ADR-0003), so restarting or upgrading the worker does not cut in-flight model streams.
-  While the worker is down the process keeps serving from the lease it holds and gets no top-ups, so it fails closed when the lease runs out.
-  On start the worker takes each session's socket back from the file descriptor store, re-adopts the running proxy through it and collects the resent records (OBS-1).
+  While the worker or the server is unreachable, no start record can be acknowledged, so the process forwards no new credentialed request; a session ended during that time cannot start new model calls.
+  Streams already in flight finish, and their end records wait in memory; there is at most one per open request, so the buffer is bounded by the number of open requests.
 - If the process exits, the session's egress stops, because nftables still redirects only to it (fail-closed).
-  The worker restarts it with the session's secrets and remaining lease.
-  Reservations the dead process held are counted as spent, so a crash can over-count spend but never under-count it.
+  The worker restarts it with the session's secrets and the remaining lease.
+  The server counts the full reservation of every request that has a start record and no end record as spent, so a crash can over-count spend but never under-count it, and every such request still has its start record in the audit log.
 - Model calls the server makes itself, outside any session (KN-2, KN-3, KN-4), go through the same binary run beside the server in gateway-only mode, with a lease from a per-tenant system budget; the server passes it keys over a Unix socket in the same way.
 - The usage parsers, pricing, reservation logic and passthrough proxy are separate crates that do not depend on Cantiere's session types, so the gateway can be released on its own later without a rewrite.
 
@@ -93,7 +95,8 @@ The terms differ by vendor:
 
 - API-key sessions get hard budget enforcement outside the sandbox, at the cost of rejecting a request near the cap whose worst case does not fit even if its real cost would; subscription sessions get best-effort enforcement only (the adapter interrupts at the cap, the gateway cannot).
 - A bug in the code that parses sandbox-controlled TLS, HTTP, GraphQL or model streams reaches one session's proxy process, that session's secrets and its remaining lease, not the worker's host privileges or other sessions.
-- The worker and the proxy process need a small protocol for secrets, lease top-ups and returned events, and each session costs one more process of a few MB.
+- The worker and the proxy process need a small protocol for secrets, lease top-ups and start and end records, and each session costs one more process of a few MB.
+- Every credentialed request waits for one round trip to the server before it is forwarded, and stops being forwarded while the worker or server is unreachable; model calls already in flight are not affected.
 - Cantiere maintains the gateway itself: each provider's usage format, including streamed and cache-token usage, and the price table must track provider changes.
   Because requests are not translated, a new provider parameter or beta header needs no gateway change unless it changes how usage is reported.
 - A subscription token in a compromised sandbox is exposed for its lifetime (up to a year for `setup-token`), or until the subscriber removes it in their Claude account settings. The token is in the `claude` process environment, so anything that runs in the guest, including the agent's own shell commands and code from the target repository, can read it; turning off project settings and repository MCP servers (above) removes only the paths that run before the first turn. Mitigations are egress allowlisting (ADR-0011), the git proxy's secret scan (ADR-0010), and the single-subscriber restriction. The scrubber catches only literal and known-pattern copies, not encoded ones.
