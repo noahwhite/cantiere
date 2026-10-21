@@ -52,9 +52,24 @@ The terms differ by vendor:
   That process hosts the model gateway together with the session's egress proxy (ADR-0011) and git proxy (ADR-0010), so the choke point those decisions share stays one process.
 - The process runs as a per-session unprivileged user with no capabilities, under a seccomp filter, with no access to `/dev/kvm`, the jailer, nftables, the worker's gRPC stream or other sessions.
   The worker creates its listening sockets in the namespace and passes them in, so it needs no privilege to bind ports 80 and 443.
-- The worker sends the process only that session's secret values, the per-session CA key and the budget lease, over one end of a Unix socket pair created at start, using the protobuf contracts of ADR-0004.
-  Values stay in the process's memory, never on disk, in argv or in its environment (ID-4).
-  Lease top-ups arrive on the same socket.
+- The process never talks to OpenBao, the server or any other secret store, and holds no credential for them.
+  Secrets reach it by the chain ADR-0010 already sets, each hop holding less: secret store to server (the only store client) to worker to proxy process.
+- The worker and the process talk over one channel, and it follows high-side and low-side rules: the worker is the high side and only pushes; the process is the low side and only reports.
+  - Down (worker to process): `Init` (protocol version, session ID, a random instance ID, that session's secret values with their injection rules, the per-session CA key, the budget lease), `LeaseTopUp`, `StartDecision`, `RecordAck` and `Stop`.
+    The worker chooses what to send from the references the persona declares (ID-3); nothing the process sends changes which secrets it gets.
+  - Up (process to worker): `Hello`, `StartRecord`, `EndRecord` and `Denial`, nothing else.
+    No message lets the process name a secret, ask for a larger lease, or refer to another session.
+  - The worker treats every upward message as untrusted input: it checks the schema, size and rate limits and value ranges, accepts an `EndRecord` only for a request ID with a start record from this process, and scrubs records before relaying them (ADR-0010).
+    A message that fails these checks stops the process, with the same effect as a crash (below), and raises an audit event.
+  - The messages are protobuf contracts (ADR-0004) with the session ID fixed by the channel, not taken from the message.
+- Introduction needs no tokens: possession of the channel is the credential.
+  The worker creates a Unix socket pair, the namespace's listening sockets and the journal file (below), then starts the process directly as the session's user in its own systemd scope, with only those descriptors open, an empty environment and no arguments that carry values.
+  It keeps a pidfd for the process and sends `Init` as the first message; values stay in the process's memory, never on disk, in argv or in its environment (ID-4).
+  The process has no write access to the filesystem other than the journal descriptor it was given.
+- On re-adoption (below) the worker checks the peer's uid with `SO_PEERCRED` against the session's user, and the process sends `Hello` with its protocol version, session ID and instance ID, which must match the name the worker stored the socket under.
+  The worker speaks the current and the previous protocol version, so a worker upgrade can re-adopt proxies started by the old worker; on any mismatch it stops the process and starts a new one.
+- The process's own outbound connections go only to addresses the worker resolver returned for allowlisted names (ADR-0011).
+  The namespace's nftables rules deny the server, OpenBao, Postgres, the object store, the host's own addresses and the metadata address before any allow rule, so an allowlisted name that resolves to one of them is still refused.
 - The worker keeps its own end of each socket in systemd's file descriptor store for the worker service (`FileDescriptorStoreMax`), so the socket stays open across `systemctl restart`, an upgrade or a crash and restart; on start the worker takes each socket back and re-adopts the running proxy through it (OBS-1).
   After a full stop the store is emptied, so on start the worker stops each proxy it cannot re-adopt and starts a new one, as after a proxy crash (below).
 - Every request that injects a credential, which includes every model request, is recorded before it is forwarded.
@@ -74,7 +89,7 @@ The terms differ by vendor:
 - If the process exits, the session's egress stops, because nftables still redirects only to it (fail-closed).
   The worker restarts it with the session's secrets and the remaining lease, after collecting its journal.
   The server counts the full reservation of every request that has a start record and no end record as spent, so a crash can over-count spend but never under-count it, and every such request still has its start record in the audit log.
-- Model calls the server makes itself, outside any session (KN-2, KN-3, KN-4), go through the same binary run beside the server in gateway-only mode, with a lease from a per-tenant system budget; the server passes it keys over a Unix socket in the same way.
+- Model calls the server makes itself, outside any session (KN-2, KN-3, KN-4), go through the same binary run beside the server in gateway-only mode, with a lease from a per-tenant system budget; the server passes it keys over a socket pair with the same message set and rules, with the server as the high side.
 - The usage parsers, pricing, reservation logic and passthrough proxy are separate crates that do not depend on Cantiere's session types, so the gateway can be released on its own later without a rewrite.
 
 **Subscription mode (opt-in, single-subscriber deployments only, COST-3).**

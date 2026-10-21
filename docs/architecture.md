@@ -125,8 +125,8 @@ sequenceDiagram
 | Boundary | What crosses it | Control |
 | --- | --- | --- |
 | Guest to worker | vsock streams; TAP traffic for DNS, 80/443 and declared tailnet | Firecracker + jailer; nftables default drop in a namespace the guest cannot see (ADR-0007, ADR-0011) |
-| Worker to session proxy process | That session's secrets, CA key and budget lease; start and end records of credentialed requests and denials back | Per-session unprivileged user, no capabilities, seccomp, own systemd scope; values in memory only (ADR-0010, ADR-0014) |
-| Session proxy process to internet | Proxied requests with injected credentials | Allowlist resolver, SNI/Host allowlist, method/path policy, git branch rule, audit (ADR-0010, ADR-0011, ADR-0015) |
+| Worker to session proxy process | That session's secrets, CA key and budget lease; start and end records of credentialed requests and denials back | Socket pair created by the worker, no tokens; worker pushes, process only reports a closed set of records, each validated as untrusted; per-session unprivileged user, no capabilities, seccomp, own systemd scope; values in memory only (ADR-0010, ADR-0014) |
+| Session proxy process to internet | Proxied requests with injected credentials | No path to the server, OpenBao, Postgres, object store, host or metadata address (ADR-0014); allowlist resolver, SNI/Host allowlist, method/path policy, git branch rule, audit (ADR-0010, ADR-0011, ADR-0015) |
 | Worker to server | One outbound authenticated gRPC stream | Per-worker credential, revocable; secrets only per session in memory (ADR-0003) |
 | Browser to server | HTTPS, WebSocket | Passkey or OIDC session, PATs for CLI (ADR-0016) |
 | Browser to sandbox content | Editor, terminal and browser view served from the guest | Separate per-session origin with a capability token, no Cantiere cookies, strict CSP (ADR-0013) |
