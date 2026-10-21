@@ -55,18 +55,24 @@ The terms differ by vendor:
 - The process never talks to OpenBao, the server or any other secret store, and holds no credential for them.
   Secrets reach it by the chain ADR-0010 already sets, each hop holding less: secret store to server (the only store client) to worker to proxy process.
 - The worker and the process talk over one channel, and it follows high-side and low-side rules: the worker is the high side and only pushes; the process is the low side and only reports.
-  - Down (worker to process): `Init` (protocol version, session ID, a random instance ID, that session's secret values with their injection rules, the per-session CA key, the budget lease), `LeaseTopUp`, `StartDecision`, `RecordAck` and `Stop`.
+  - Down (worker to process): `Init` (protocol version, session ID, a random instance ID, that session's secret values with their injection rules, the per-session CA key, the budget lease), `SecretUpdate` and `SecretRevoke` (replace or remove one value, for refresh such as the hourly GitHub token and for revocation such as an unlinked user's token, ADR-0010, ADR-0012), `LeaseTopUp`, `StartDecision`, `RecordAck` and `Stop`.
+    A secret update or revocation applies to requests the process starts after it, without restarting the process.
     The worker chooses what to send from the references the persona declares (ID-3); nothing the process sends changes which secrets it gets.
   - Up (process to worker): `Hello`, `StartRecord`, `EndRecord` and `Denial`, nothing else.
     No message lets the process name a secret, ask for a larger lease, or refer to another session.
   - The worker treats every upward message as untrusted input: it checks the schema, size and rate limits and value ranges, accepts an `EndRecord` only for a request ID with a start record from this process, and scrubs records before relaying them (ADR-0010).
     A message that fails these checks stops the process, with the same effect as a crash (below), and raises an audit event.
+  - These checks cannot prove that a reservation or a usage report matches what was sent to or returned by the provider: the process holds the key and is the only component that sees the traffic.
+    The budget cap therefore holds against the guest, not against a compromised proxy process, which could under-report and spend up to whatever the provider allows for that key (a gateway inside the worker would have the same limit, running as root).
+    Two backstops do not depend on the process: operators set provider-side spend limits on each key where the provider offers them, and the server compares recorded cost per key each day with the provider's usage reports where available and raises an alert on a difference.
   - The messages are protobuf contracts (ADR-0004) with the session ID fixed by the channel, not taken from the message.
 - Introduction needs no tokens: possession of the channel is the credential.
   The worker creates a Unix socket pair, the namespace's listening sockets and the journal file (below), then starts the process directly as the session's user in its own systemd scope, with only those descriptors open, an empty environment and no arguments that carry values.
   It keeps a pidfd for the process and sends `Init` as the first message; values stay in the process's memory, never on disk, in argv or in its environment (ID-4).
   The process has no write access to the filesystem other than the journal descriptor it was given.
-- On re-adoption (below) the worker checks the peer's uid with `SO_PEERCRED` against the session's user, and the process sends `Hello` with its protocol version, session ID and instance ID, which must match the name the worker stored the socket under.
+- On re-adoption (below) the process sends `Hello` with its protocol version, session ID and instance ID, which must match the name the worker stored the socket under.
+  The worker sets `SO_PASSCRED` on its end and checks the `SCM_CREDENTIALS` the kernel attaches to `Hello`: the uid must be the session's user and the pid the process in the session's proxy scope.
+  `SO_PEERCRED` is not used, because on a socket pair it reports the worker that created the pair.
   The worker speaks the current and the previous protocol version, so a worker upgrade can re-adopt proxies started by the old worker; on any mismatch it stops the process and starts a new one.
 - The process's own outbound connections go only to addresses the worker resolver returned for allowlisted names (ADR-0011).
   The namespace's nftables rules deny the server, OpenBao, Postgres, the object store, the host's own addresses and the metadata address before any allow rule, so an allowlisted name that resolves to one of them is still refused.
@@ -117,6 +123,7 @@ The terms differ by vendor:
 
 - API-key sessions get hard budget enforcement outside the sandbox, at the cost of rejecting a request near the cap whose worst case does not fit even if its real cost would; subscription sessions get best-effort enforcement only (the adapter interrupts at the cap, the gateway cannot).
 - A bug in the code that parses sandbox-controlled TLS, HTTP, GraphQL or model streams reaches one session's proxy process, that session's secrets and its remaining lease, not the worker's host privileges or other sessions.
+- Budget enforcement trusts the proxy process's usage reports; a compromise of that process can exceed the cap up to the provider-side limit, which provider limits and daily reconciliation bound and detect.
 - The worker and the proxy process need a small protocol for secrets, lease top-ups and start and end records, plus a per-session journal file for end records, and each session costs one more process of a few MB.
 - Every credentialed request waits for one round trip to the server before it is forwarded, and stops being forwarded while the worker or server is unreachable; model calls already in flight are not affected.
 - Cantiere maintains the gateway itself: each provider's usage format, including streamed and cache-token usage, and the price table must track provider changes.
