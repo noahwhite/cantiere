@@ -43,7 +43,8 @@ providers:
         claude-opus-5-5: {upstream: corp/claude-opus-5-5, signal_values: [opus-eu-1], fallbacks: [claude-sonnet-5-5]}
         claude-sonnet-5-5: {upstream: corp/claude-sonnet-5-5, signal_values: [sonnet-eu-1]}
       usage_report: null            # optional: upstream usage API for daily reconciliation
-      refusals: [{status: 429, error_code: budget_exceeded}]
+      refusals: [{status: 429, error_code: budget_exceeded}]   # only errors the upstream returns before calling a model
+      pre_invocation_errors: [{status: 401}]                     # optional: other errors returned before calling a model
 ```
 
 ```yaml
@@ -78,29 +79,30 @@ secrets: [{provider: anthropic-via-corp, ref: "openbao://kv/models#corp-gw"}]
 - An upstream is trusted the way a provider is: the gateway cannot prove which model ran, only what the upstream reports.
   A provider's `model` field is that report for a direct provider, but an upstream's body `model` need not name what ran: LiteLLM, for example, returns the requested name when it switches between deployments inside one model group.
 - Each upstream entry therefore declares `model_signal`: the response header, or the body field for the entry's API shape, in which the upstream identifies what answered, such as LiteLLM's [`x-litellm-model-id`](https://docs.litellm.ai/docs/proxy/response_headers), the ID of the deployment that served the request.
-  Each alias and fallback lists the exact values that identify it in `signal_values` (for LiteLLM, deployment IDs the operator pins with `model_info.id`), and config validation rejects an alias or fallback without one.
+  Each alias and fallback lists the exact values that identify it in `signal_values` (for LiteLLM, deployment IDs the operator pins with `model_info.id`), and config validation rejects an alias or fallback without one, and any value listed under more than one model key in the provider entry, so each value identifies exactly one price entry.
   The signal is matched against those values, not against the upstream names.
 - The gateway reads the signal from the response headers, the first stream event (Anthropic `message_start`, OpenAI Chat Completions' first chunk, Responses `response.created`) or the body of a non-streamed response, before relaying any byte to the guest.
-- The check applies to successful responses only; an error response ran no model, so it is first matched against `refusals` and otherwise passes through with its reservation released, as for a provider error (ADR-0014).
-  Upstreams such as LiteLLM [send the signal only on successful responses](https://github.com/BerriAI/litellm/issues/17083).
+- The check applies to successful responses only, because upstreams such as LiteLLM [send the signal only on successful responses](https://github.com/BerriAI/litellm/issues/17083); error responses follow the rules under the next heading.
 - If a successful response's signal is missing or matches none of the requested model's or its declared fallbacks' `signal_values`, the gateway aborts the response, charges the full reservation, records a `model_mismatch` event and pauses the session to the inbox.
   A pricier model could otherwise spend past the reservation, and a denied model would otherwise reach the guest (RT-3).
 - An API shape whose responses name no model, such as Bedrock and Vertex, is allowed behind an upstream only with a header `model_signal`; config validation rejects it otherwise.
 - Operators who want upstream failover declare it with fallbacks in `model_aliases`; every fallback must be priced and allowed.
   The reservation is the largest of the ADR-0014 worst cases computed for the request against the requested model and against each declared fallback, each with its own price entry, maximum output, tier thresholds, tokenizer, modalities, provider-run tools and price switches; a request that the rules for any of them would refuse is refused.
 
-**Upstream refusals pause the session.**
+**Upstream refusals pause the session; other errors are charged unless declared pre-invocation.**
 
 - A response that matches an entry in `refusals` (status plus error code or type for the entry's API shape) is replaced with the gateway's own `cantiere_upstream_refused` error, HTTP 402, in the provider's error format, and the adapter pauses the session to the inbox with the upstream's reason.
   Conformance test 9's no-retry check covers it.
 - Upstreams add two exceptions to unchanged passthrough, next to `cantiere_budget_exceeded` (ADR-0014): the alias rewrite of the request's model, and this refusal replacement.
-- Other upstream errors, including 5xx and unmatched 429, pass through as a provider's would.
+- An error does not prove that no model ran: an upstream can fail after a billed call, or block a response with a post-call guardrail or data-loss check.
+  So only errors the operator declares as returned before any model call, the `refusals` and `pre_invocation_errors` entries, release their reservation.
+  Every other upstream error, including 5xx and unmatched 429, passes through unchanged and is charged at its reported usage, or at its full reservation when it reports none, under ADR-0014's rule for a request whose final usage never arrives.
 
 **Reconciliation and key limits.**
 
 - The daily reconciliation compares recorded cost per upstream key with the upstream's usage API where `usage_report` is set; without it the UI says reconciliation is unavailable for that key.
 - The docs recommend a hard budget on each upstream key, which is the provider-side key limit COST-2 relies on as a backstop, and which many providers do not offer directly.
-- Spend through an upstream is shown as estimated, because the upstream's bill is the invoice (COST-1, UX-1).
+- Spend through an upstream is shown as estimated, because the upstream's bill is the invoice (COST-1, UX-1); undeclared upstream errors are charged in full, so recorded spend can exceed the invoice.
 
 **Scope.**
 
@@ -121,8 +123,9 @@ To be numbered on acceptance, in the Cost section of requirements.md, priority S
 2. opencode runs end to end through a public OpenAI-shape upstream.
 3. A private upstream declared by address is reachable from the proxy process and from the gateway-only server under systemd and under Compose; the guest's direct connection to that address is dropped and logged; an undeclared private address is still dropped; a declared address equal to a platform or host address is rejected at config validation.
 4. A successful response whose `model_signal` matches none of the requested model's or its declared fallbacks' `signal_values`, or lacks the signal, is aborted before any byte reaches the guest, charged its full reservation, and pauses the session.
+   Config validation rejects a signal value listed under two model keys.
    This is tested against each conformance-suite upstream by forcing an undeclared failover inside it, which must be detected even when the response's own `model` field still shows the requested alias.
-5. A mapped upstream refusal that carries no `model_signal` becomes `cantiere_upstream_refused` and pauses the session, and the runtime does not retry it.
+5. A mapped upstream refusal that carries no `model_signal` becomes `cantiere_upstream_refused`, releases its reservation and pauses the session, and the runtime does not retry it; an undeclared upstream 5xx without usage is charged its full reservation.
 6. Attribution headers reach the upstream with server-filled values; guest-supplied headers with the same names are stripped.
 7. A request with no output limit, whose declared fallback has a larger maximum output or a higher tier price than the requested model, reserves the fallback's worst case.
 
