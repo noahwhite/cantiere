@@ -12,7 +12,7 @@ The worker manages KVM, TAP devices, nftables and block devices, which needs hos
 ## Decision
 
 - Releases publish, for linux/amd64 and linux/arm64 and signed with Sigstore cosign:
-  - static `cantiere-worker` and `cantiere-guest` binaries (Rust, musl);
+  - static `cantiere-worker` and `cantiere-guest` binaries (Rust, musl), with `cantiere-worker` also as a container image for the Compose model gateway (ADR-0014);
   - `cantiere-server` as a Quarkus fast-jar bundled with a `jlink` Java runtime, so hosts need no JDK, and as a container image built from the same artifact;
   - a kernel and base rootfs for sandboxes.
 - The server runs on the JVM, not as a GraalVM native image: startup time does not matter for a long-running service, and native images restrict the reflection that DBOS and gRPC rely on. Native images can be revisited later without changing the API.
