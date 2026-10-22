@@ -16,9 +16,11 @@ Credential injection (ADR-0010) and model metering (ADR-0014) need the same chok
 
 - Each VM gets its own network namespace on the worker with one TAP device; the guest sees a fixed link-local address and the worker as its only gateway.
 - Host nftables in that namespace drops everything by default, then allows: DNS to the worker's resolver; TCP 80 and 443 redirected to the worker's egress proxy; the tailnet range to the session's Tailscale node, if declared.
-- No route exists to the host, other namespaces, the cloud metadata address, or the worker's private networks.
+- No route exists from the guest to the host, other namespaces, the cloud metadata address, or the worker's private networks.
+  The namespace's uplink carries only the traffic of the session's proxy process, under its own output rules (ADR-0014), and of the session's `tailscaled`.
 
 **Resolver.** The worker answers DNS only for names on the session's allowlist and returns `NXDOMAIN` for the rest, which closes DNS-tunnel exfiltration and gives an early, logged denial.
+A second listening address, which only the session's proxy process can reach, also answers the upstream hosts of the session's model secrets, which the guest reaches only through the model gateway (ADR-0014).
 
 **Egress proxy** (Rust, part of `cantiere-worker`, transparent; it runs in the session's unprivileged proxy process with the git proxy and model gateway, ADR-0014):
 
