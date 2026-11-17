@@ -58,7 +58,11 @@ fetch() {
   if [ ! -f "$3" ]; then
     local part
     part="$(mktemp "$3.XXXXXX")"
-    curl -fsSL --retry 3 -o "$part" "$1"
+    if ! curl -fsSL --retry 3 -o "$part" "$1"; then
+      rm -f "$part"
+      echo "export-requirements: download failed for $1" >&2
+      exit 1
+    fi
     if ! echo "$2  $part" | sha256sum -c --quiet -; then
       rm -f "$part"
       echo "export-requirements: checksum mismatch for $1" >&2
