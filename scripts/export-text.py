@@ -4,8 +4,9 @@ Usage: export-text.py <pypdf wheel> <export>. pypdf is imported from the wheel, 
 has verified against its pinned SHA-256.
 Used by scripts/export-requirements.sh --check to compare a committed export with a regenerated one.
 The docx text is read from its XML rather than through pandoc, so the check does not depend on the
-tool that wrote the file. List bullets are part of the docx text because pandoc writes a task
-list's checkbox (U+2610 or U+2612) as the bullet, not as a character in the paragraph.
+tool that wrote the file. List markers are part of the docx text: Word stores them in the numbering
+definitions, not in the paragraph, and they carry content - a task list's checkbox (U+2610 or
+U+2612) is its bullet, and an ordered list's numbers come from each list's start value.
 """
 import sys
 import textwrap
@@ -15,30 +16,75 @@ from xml.etree import ElementTree
 W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 
 
+def val(element, child):
+    found = element.find(W + child)
+    return found.get(W + "val") if found is not None else None
+
+
+def roman(n):
+    out = ""
+    for value, letters in ((1000, "m"), (900, "cm"), (500, "d"), (400, "cd"), (100, "c"), (90, "xc"),
+                           (50, "l"), (40, "xl"), (10, "x"), (9, "ix"), (5, "v"), (4, "iv"), (1, "i")):
+        while n >= value:
+            out, n = out + letters, n - value
+    return out
+
+
+def letters(n):
+    out = ""
+    while n > 0:
+        n, rest = divmod(n - 1, 26)
+        out = chr(ord("a") + rest) + out
+    return out
+
+
+FORMATS = {
+    "lowerLetter": letters,
+    "upperLetter": lambda n: letters(n).upper(),
+    "lowerRoman": roman,
+    "upperRoman": lambda n: roman(n).upper(),
+}
+
+
 def docx_text(path):
     with zipfile.ZipFile(path) as docx:
         body = ElementTree.fromstring(docx.read("word/document.xml"))
         names = docx.namelist()
         numbering = ElementTree.fromstring(docx.read("word/numbering.xml")) if "word/numbering.xml" in names else None
-    bullets = {}
+    # levels[numId][ilvl] = (format, level text, start)
+    levels = {}
     if numbering is not None:
         abstract = {}
         for definition in numbering.iter(W + "abstractNum"):
-            levels = {}
-            for level in definition.iter(W + "lvl"):
-                fmt, text = level.find(W + "numFmt"), level.find(W + "lvlText")
-                if fmt is not None and fmt.get(W + "val") == "bullet" and text is not None:
-                    levels[level.get(W + "ilvl")] = text.get(W + "val")
-            abstract[definition.get(W + "abstractNumId")] = levels
+            abstract[definition.get(W + "abstractNumId")] = {
+                level.get(W + "ilvl"): (val(level, "numFmt"), val(level, "lvlText") or "", int(val(level, "start") or 1))
+                for level in definition.iter(W + "lvl")
+            }
         for num in numbering.iter(W + "num"):
-            bullets[num.get(W + "numId")] = abstract.get(num.find(W + "abstractNumId").get(W + "val"), {})
+            merged = dict(abstract.get(val(num, "abstractNumId"), {}))
+            for override in num.iter(W + "lvlOverride"):
+                ilvl, start = override.get(W + "ilvl"), val(override, "startOverride")
+                if ilvl in merged and start is not None:
+                    merged[ilvl] = merged[ilvl][:2] + (int(start),)
+            levels[num.get(W + "numId")] = merged
+    counters = {}
     paragraphs = []
     for paragraph in body.iter(W + "p"):
         marker = ""
         num = paragraph.find(f"{W}pPr/{W}numPr")
-        if num is not None and num.find(W + "numId") is not None:
-            level = num.find(W + "ilvl")
-            marker = bullets.get(num.find(W + "numId").get(W + "val"), {}).get(level.get(W + "val") if level is not None else "0", "")
+        if num is not None and val(num, "numId") in levels:
+            definition = levels[val(num, "numId")]
+            ilvl = int(val(num, "ilvl") or 0)
+            count = counters.setdefault(val(num, "numId"), {})
+            for deeper in [level for level in count if level > ilvl]:
+                del count[deeper]
+            fmt, marker, start = definition.get(str(ilvl), (None, "", 1))
+            count[ilvl] = count.get(ilvl, start - 1) + 1
+            if fmt != "bullet":
+                for level in range(ilvl + 1):
+                    level_fmt, _, level_start = definition.get(str(level), (None, "", 1))
+                    number = count.get(level, level_start)
+                    marker = marker.replace(f"%{level + 1}", FORMATS.get(level_fmt, str)(number))
         paragraphs.append(marker + " " + "".join(t.text or "" for t in paragraph.iter(W + "t")))
     return " ".join(paragraphs)
 

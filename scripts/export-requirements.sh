@@ -52,14 +52,23 @@ trap 'rm -rf "$work"' EXIT
 # fetch <url> <sha256> <file>: download once into the cache, verify the checksum on every run.
 # Only the downloaded archives are cached; the tools run from a copy unpacked into $work after
 # the check, so nothing in the cache is executed unverified.
+# A download goes to a file of its own and is renamed into the cache only once it is verified, so
+# concurrent runs sharing a cache never see each other's partial files.
 fetch() {
   if [ ! -f "$3" ]; then
-    curl -fsSL --retry 3 -o "$3.part" "$1"
-    mv "$3.part" "$3"
+    local part
+    part="$(mktemp "$3.XXXXXX")"
+    curl -fsSL --retry 3 -o "$part" "$1"
+    if ! echo "$2  $part" | sha256sum -c --quiet -; then
+      rm -f "$part"
+      echo "export-requirements: checksum mismatch for $1" >&2
+      exit 1
+    fi
+    mv -f "$part" "$3"
   fi
   if ! echo "$2  $3" | sha256sum -c --quiet -; then
     rm -f "$3"
-    echo "export-requirements: checksum mismatch for $1" >&2
+    echo "export-requirements: checksum mismatch for the cached $3; run again to download it afresh" >&2
     exit 1
   fi
 }
@@ -69,9 +78,10 @@ mkdir "$work/pandoc"
 tar -xzf "$tools/$PANDOC_ASSET" -C "$work/pandoc" --strip-components=1
 pandoc="$work/pandoc/bin/pandoc"
 
-fetch "https://github.com/typst/typst/releases/download/v$TYPST_VERSION/$TYPST_ASSET" "$TYPST_SHA256" "$tools/$TYPST_ASSET"
+# Typst's asset name carries no version, so the cached copy is named with it.
+fetch "https://github.com/typst/typst/releases/download/v$TYPST_VERSION/$TYPST_ASSET" "$TYPST_SHA256" "$tools/typst-$TYPST_VERSION-$TYPST_ASSET"
 mkdir "$work/typst"
-tar -xJf "$tools/$TYPST_ASSET" -C "$work/typst" --strip-components=1
+tar -xJf "$tools/typst-$TYPST_VERSION-$TYPST_ASSET" -C "$work/typst" --strip-components=1
 typst="$work/typst/typst"
 
 # A fixed timestamp keeps the export metadata stable between runs.
@@ -86,8 +96,10 @@ cd "$work"
 export_to() {
   # Without rsvg-convert pandoc embeds the SVG diagram with no PNG fallback, which Word before
   # 2016 cannot show, so the docx gets a PNG of it rendered by Typst instead.
-  printf '#set page(width: auto, height: auto, margin: 0pt)\n#image("%s")\n' "$repo/docs/architecture.svg" > "$work/diagram.typ"
-  "$typst" compile --ignore-system-fonts --root / --ppi 200 "$work/diagram.typ" "$work/architecture.png"
+  # The SVG is copied next to the Typst source so the checkout path never appears inside it.
+  cp "$repo/docs/architecture.svg" "$work/architecture.svg"
+  printf '#set page(width: auto, height: auto, margin: 0pt)\n#image("architecture.svg")\n' > "$work/diagram.typ"
+  "$typst" compile --ignore-system-fonts --root "$work" --ppi 200 "$work/diagram.typ" "$work/architecture.png"
   printf 'function Image(img)\n  if img.src == "architecture.svg" then img.src = "architecture.png" end\n  return img\nend\n' > "$work/diagram-png.lua"
   "$pandoc" -f gfm --shift-heading-level-by=-1 "$repo/docs/requirements.md" --resource-path="$repo/docs:$work" \
     --lua-filter="$work/diagram-png.lua" -o "$1/requirements.docx"
