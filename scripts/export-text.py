@@ -1,5 +1,7 @@
 """Print the text of a .docx or .pdf export, whitespace collapsed and wrapped at 100 columns.
 
+Usage: export-text.py <pypdf wheel> <export>. pypdf is imported from the wheel, which the caller
+has verified against its pinned SHA-256.
 Used by scripts/export-requirements.sh --check to compare a committed export with a regenerated one.
 The docx text is read from its XML rather than through pandoc, so the check does not depend on the
 tool that wrote the file. List bullets are part of the docx text because pandoc writes a task
@@ -47,6 +49,7 @@ def pdf_text(path):
     return " ".join(page.extract_text() for page in PdfReader(path).pages)
 
 
-path = sys.argv[1]
+sys.path.insert(0, sys.argv[1])
+path = sys.argv[2]
 text = docx_text(path) if path.endswith(".docx") else pdf_text(path)
 print(textwrap.fill(" ".join(text.split()), 100, break_long_words=False, break_on_hyphens=False))

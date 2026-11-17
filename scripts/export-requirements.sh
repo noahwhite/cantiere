@@ -6,13 +6,14 @@
 #                                           when the text of either committed export differs
 #
 # Text is compared, not bytes, because export metadata is not part of the content.
-# Every tool is pinned by version and SHA-256 and cached outside the repository.
-# Supported hosts: Linux x86_64 and aarch64, with curl, tar, xz, sha256sum and python3.
+# Every tool is pinned by version and SHA-256, and its download is cached outside the repository.
+# Supported hosts: Linux x86_64 and aarch64, with curl, tar, xz and sha256sum (and python3 for --check).
 set -euo pipefail
 
 PANDOC_VERSION=3.13
 TYPST_VERSION=0.15.1
 PYPDF_VERSION=6.9.2
+PYPDF_URL=https://files.pythonhosted.org/packages/a5/7e/c85f41243086a8fe5d1baeba527cb26a1918158a565932b41e0f7c0b32e9/pypdf-6.9.2-py3-none-any.whl
 PYPDF_SHA256=662cf29bcb419a36a1365232449624ab40b7c2d0cfc28e54f42eeecd1fd7e844
 
 case "$(uname -s)-$(uname -m)" in
@@ -41,11 +42,16 @@ case "${1-}" in
   *) echo "usage: $0 [--check]" >&2; exit 2 ;;
 esac
 
-repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+repo="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 tools="${XDG_CACHE_HOME:-$HOME/.cache}/cantiere-export-tools"
 mkdir -p "$tools"
 
-# fetch <url> <sha256> <file>: download once, verify the checksum every time.
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
+
+# fetch <url> <sha256> <file>: download once into the cache, verify the checksum on every run.
+# Only the downloaded archives are cached; the tools run from a copy unpacked into $work after
+# the check, so nothing in the cache is executed unverified.
 fetch() {
   if [ ! -f "$3" ]; then
     curl -fsSL --retry 3 -o "$3.part" "$1"
@@ -58,30 +64,20 @@ fetch() {
   fi
 }
 
-pandoc_dir="$tools/pandoc-$PANDOC_VERSION"
-if [ ! -x "$pandoc_dir/bin/pandoc" ]; then
-  fetch "https://github.com/jgm/pandoc/releases/download/$PANDOC_VERSION/$PANDOC_ASSET" "$PANDOC_SHA256" "$tools/$PANDOC_ASSET"
-  rm -rf "$pandoc_dir"
-  mkdir -p "$pandoc_dir"
-  tar -xzf "$tools/$PANDOC_ASSET" -C "$pandoc_dir" --strip-components=1
-fi
-pandoc="$pandoc_dir/bin/pandoc"
+fetch "https://github.com/jgm/pandoc/releases/download/$PANDOC_VERSION/$PANDOC_ASSET" "$PANDOC_SHA256" "$tools/$PANDOC_ASSET"
+mkdir "$work/pandoc"
+tar -xzf "$tools/$PANDOC_ASSET" -C "$work/pandoc" --strip-components=1
+pandoc="$work/pandoc/bin/pandoc"
 
-typst_dir="$tools/typst-$TYPST_VERSION"
-if [ ! -x "$typst_dir/typst" ]; then
-  fetch "https://github.com/typst/typst/releases/download/v$TYPST_VERSION/$TYPST_ASSET" "$TYPST_SHA256" "$tools/$TYPST_ASSET"
-  rm -rf "$typst_dir"
-  mkdir -p "$typst_dir"
-  tar -xJf "$tools/$TYPST_ASSET" -C "$typst_dir" --strip-components=1
-fi
-typst="$typst_dir/typst"
+fetch "https://github.com/typst/typst/releases/download/v$TYPST_VERSION/$TYPST_ASSET" "$TYPST_SHA256" "$tools/$TYPST_ASSET"
+mkdir "$work/typst"
+tar -xJf "$tools/$TYPST_ASSET" -C "$work/typst" --strip-components=1
+typst="$work/typst/typst"
 
 # A fixed timestamp keeps the export metadata stable between runs.
 export SOURCE_DATE_EPOCH=0
 
 # pandoc writes its intermediate Typst file to the current directory.
-work="$(mktemp -d)"
-trap 'rm -rf "$work"' EXIT
 cd "$work"
 
 # export_to <dir>: write requirements.docx and requirements.pdf into <dir>.
@@ -104,26 +100,24 @@ export_to() {
     -o "$1/requirements.pdf"
 }
 
+mkdir "$work/fresh"
+export_to "$work/fresh"
+
 if [ "$mode" = generate ]; then
-  export_to "$repo/docs"
+  # Both exports are written before either replaces the committed one.
+  mv "$work/fresh/requirements.docx" "$repo/docs/requirements.docx"
+  mv "$work/fresh/requirements.pdf" "$repo/docs/requirements.pdf"
   echo "export-requirements: wrote docs/requirements.docx and docs/requirements.pdf"
   exit 0
 fi
 
-venv="$tools/pypdf-$PYPDF_VERSION"
-if [ ! -x "$venv/bin/python" ]; then
-  rm -rf "$venv"
-  python3 -m venv "$venv"
-  echo "pypdf==$PYPDF_VERSION --hash=sha256:$PYPDF_SHA256" > "$venv/requirements.txt"
-  "$venv/bin/python" -m pip install --quiet --disable-pip-version-check --no-deps --require-hashes -r "$venv/requirements.txt"
-fi
-
-mkdir "$work/fresh"
-export_to "$work/fresh"
+# pypdf is pure Python, so it is imported straight from its verified wheel.
+pypdf_wheel="$tools/pypdf-$PYPDF_VERSION-py3-none-any.whl"
+fetch "$PYPDF_URL" "$PYPDF_SHA256" "$pypdf_wheel"
 
 # text_of <file> <out>: the export's text, rewrapped so a difference shows as a readable diff.
 text_of() {
-  "$venv/bin/python" -I "$repo/scripts/export-text.py" "$1" > "$2"
+  python3 -I "$repo/scripts/export-text.py" "$pypdf_wheel" "$1" > "$2"
 }
 
 status=0
