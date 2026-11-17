@@ -33,6 +33,9 @@ The terms differ by vendor:
   budget: {session_usd: 5}
   ```
 
+- A model secret is a secret entry that names its provider, as the `secrets` entry above does.
+  Each provider is declared in the config repo (ADR-0017) with the upstream host the gateway sends that provider's requests to, for example `api.moonshot.ai` for `moonshot`; those declared hosts are the upstream hosts of the providers in a set of model secrets.
+  A session's model secrets come from its persona; the model secrets the gateway-only service holds (below) are those the config repo declares for the server's own model calls, which the server sends it in `Init`.
 - The gateway does four things:
   - injects the real key (Anthropic, OpenAI, Bedrock, Vertex, or any OpenAI-compatible endpoint such as DeepSeek, Moonshot, OpenRouter or a local vLLM);
   - rejects requests for denied models (RT-3);
@@ -194,7 +197,7 @@ The terms differ by vendor:
   It has a lease from a per-tenant system budget, and the same message set, budget rules and journal, with the server as the high side.
 - It applies the same non-dumpable setting, Landlock ruleset, seccomp filter and secret memory as the session process.
   In place of the spawn helper, its unit gives it an empty read-only root with only the binary (`TemporaryFileSystem=/`), `PrivateDevices`, `ProtectProc=invisible`, `MemoryMax`, `TasksMax`, `LimitCORE=0` and `LimitFSIZE` at the journal's size cap, which holds each journal file to that cap in the kernel as `RLIMIT_FSIZE` does for a session process.
-  In place of the session chain, host nftables output rules for its user run in the same order: accept established connections, DNS to its resolver and declared private upstreams; drop the same address ranges; then allow new TCP connections to port 443 only to addresses in a set its resolver fills with its answers for the provider hosts in the price table, each for the answer's TTL.
+  In place of the session chain, host nftables output rules for its user run in the same order: accept established connections, DNS to its resolver and declared private upstreams; drop the same address ranges; then allow new TCP connections to port 443 only to addresses in a set its resolver fills with its answers for the upstream hosts of the providers in the model secrets the gateway-only service holds (API-key mode, above; ADR-0017), each for the answer's TTL.
   Its resolver is the worker's resolver (ADR-0011), with the same refusals, run by a companion unit, `cantiere-gateway-resolver`, under its own user, and it listens on a loopback address and an unprivileged port, since it holds no capability to bind port 53; the gateway gets that address and port in `Init`, since its empty root holds no `/etc/resolv.conf`.
   A process holding `CAP_NET_ADMIN` in the host network namespace can rewrite the whole host ruleset, and seccomp cannot inspect netlink messages, so the process that parses DNS holds no capability.
   The unit starts a set updater with only `CAP_NET_ADMIN`; it opens its netlink socket, makes itself non-dumpable, and starts the resolver as a child over a socket pair; the child drops every capability before it reads any network input, and its seccomp allowlist has no `ptrace` or `kill` calls and allows `socket` only for UDP and TCP over IPv4 and IPv6, so it queries from a random source port and retries a truncated answer over TCP but cannot open a netlink socket.
