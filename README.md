@@ -43,6 +43,13 @@ Cantiere does not resell or proxy model access.
 Each user signs in to their agent CLI with their own API key, subscription or cloud provider credential.
 Use of each runtime is subject to its vendor's terms.
 
+## Requirements exports
+
+[docs/requirements.md](docs/requirements.md) is the source of the requirements; `docs/requirements.docx` and `docs/requirements.pdf` are generated from it.
+After editing `docs/requirements.md`, run `scripts/export-requirements.sh` and commit the regenerated exports with it.
+CI runs `scripts/export-requirements.sh --check`, which fails when the text of either export differs from a fresh export.
+The script downloads pinned pandoc, Typst and pypdf versions, checked by SHA-256, into `cantiere-export-tools` under `$XDG_CACHE_HOME` (default `~/.cache`), and runs on Linux x86_64 or aarch64 with `curl`, `tar`, `xz` and `sha256sum`; `--check` also needs `python3`.
+
 ## Contributing
 
 The project isn't accepting code contributions yet; issues and design feedback are welcome.
