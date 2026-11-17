@@ -45,18 +45,35 @@ FORMATS = {
     "upperRoman": lambda n: roman(n).upper(),
 }
 
-NO_LEVEL = (None, "", 1, None)
+# ECMA-376 Part 1 defaults for elements a w:lvl omits: no format, no level text, start 0 (17.9.26)
+# and no lvlRestart (17.9.11).
+NO_LEVEL = (None, "", 0, None)
 
 
-def level_of(level, base):
-    """A w:lvl as (format, level text, start, restart); an element it omits keeps base's value."""
+def level_of(level):
+    """A w:lvl as (format, level text, start, restart), with the defaults above for omitted elements.
+
+    restart is the w:lvlRestart value: None when omitted, 0 when the level never restarts, otherwise
+    the one-based level whose items restart it.
+    """
     fmt, text, start, restart = val(level, "numFmt"), val(level, "lvlText"), val(level, "start"), val(level, "lvlRestart")
     return (
-        fmt if fmt is not None else base[0],
-        text if text is not None else base[1],
-        int(start) if start is not None else base[2],
-        int(restart) if restart is not None else base[3],
+        fmt,
+        text if text is not None else NO_LEVEL[1],
+        int(start) if start is not None else NO_LEVEL[2],
+        int(restart) if restart is not None else NO_LEVEL[3],
     )
+
+
+def restarts(definition, deeper, ilvl):
+    """Whether an item at ilvl restarts the counter of the deeper level (ECMA-376 Part 1, 17.9.11)."""
+    restart = definition.get(str(deeper), NO_LEVEL)[3]
+    # An omitted lvlRestart, or one naming this level or a deeper one (which the standard says to
+    # ignore), restarts the level after any shallower item, as Word does.
+    if restart is None or restart > deeper:
+        return True
+    # 0 never restarts; otherwise only an item at the named one-based level restarts it.
+    return restart != 0 and ilvl == restart - 1
 
 
 def docx_text(path):
@@ -64,24 +81,23 @@ def docx_text(path):
         body = ElementTree.fromstring(docx.read("word/document.xml"))
         names = docx.namelist()
         numbering = ElementTree.fromstring(docx.read("word/numbering.xml")) if "word/numbering.xml" in names else None
-    # levels[numId][ilvl] = (format, level text, start, restart). restart is w:lvlRestart: None when
-    # absent (the level restarts after any shallower item), 0 when it never restarts, otherwise the
-    # one-based level whose items restart it.
+    # levels[numId][ilvl] = level_of(...) of the level in effect for that list.
     levels = {}
     if numbering is not None:
         abstract = {}
         for definition in numbering.iter(W + "abstractNum"):
             abstract[definition.get(W + "abstractNumId")] = {
-                level.get(W + "ilvl"): level_of(level, NO_LEVEL) for level in definition.iter(W + "lvl")
+                level.get(W + "ilvl"): level_of(level) for level in definition.iter(W + "lvl")
             }
         for num in numbering.iter(W + "num"):
             merged = dict(abstract.get(val(num, "abstractNumId"), {}))
             for override in num.iter(W + "lvlOverride"):
                 ilvl = override.get(W + "ilvl")
-                # A full w:lvl inside the override replaces the level; startOverride then wins.
+                # A w:lvl inside the override replaces the abstract level outright (17.9.6): nothing
+                # it omits is inherited. startOverride then sets its start.
                 replacement = override.find(W + "lvl")
                 if replacement is not None:
-                    merged[ilvl] = level_of(replacement, merged.get(ilvl, NO_LEVEL))
+                    merged[ilvl] = level_of(replacement)
                 start = val(override, "startOverride")
                 if ilvl in merged and start is not None:
                     merged[ilvl] = merged[ilvl][:2] + (int(start),) + merged[ilvl][3:]
@@ -95,10 +111,8 @@ def docx_text(path):
             definition = levels[val(num, "numId")]
             ilvl = int(val(num, "ilvl") or 0)
             count = counters.setdefault(val(num, "numId"), {})
-            for deeper in [level for level in count if level > ilvl]:
-                restart = definition.get(str(deeper), NO_LEVEL)[3]
-                if restart is None or ilvl < restart:
-                    del count[deeper]
+            for deeper in [level for level in count if level > ilvl and restarts(definition, level, ilvl)]:
+                del count[deeper]
             fmt, marker, start, _ = definition.get(str(ilvl), NO_LEVEL)
             count[ilvl] = count.get(ilvl, start - 1) + 1
             if fmt != "bullet":
