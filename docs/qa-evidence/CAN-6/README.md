@@ -1,27 +1,30 @@
 # QA evidence: CAN-6
 
 Story: CAN-6, [Bug] ADR-0014 compromise paths omit the JSON, tokenizer and image parsers.
-QA round: 1, on 2026-11-17.
+QA round: 2, on 2026-11-17.
+Round 1 (merged in PR https://github.com/noahwhite/cantiere/pull/25) verified every item except AC3, which it left as a pending owner ruling.
+The owner ruled for reading A, and the product owner amended AC3 on 2026-11-17; this round verifies every item against the current story text, including the amended AC3.
 Path: no-deployment.
 Target: merged commit `765ff6096b1564c5b0b2f8a86355b77f50c08cb1` on `main` (PR https://github.com/noahwhite/cantiere/pull/20).
 Target confirmed on `main`: `git merge-base --is-ancestor 765ff6096b1564c5b0b2f8a86355b77f50c08cb1 origin/main` exited 0.
 Comparison base: the target's parent `e96198b3dc9e7ddcf17338c389f4d45f98e78eb1`.
 Environment, deployed build and fixtures: none, because nothing is deployed on this path.
-Method: a read-only probe over the clone, counting each added phrase in ADR-0014 at the parent and at the target, plus `git diff`, `grep` of the mirror documents and the PR's review list.
-The full probe output is attached to the CAN-6 story as `CAN-6-qa-assertions.txt`.
+Method: a read-only probe over a fresh clone at the target, counting each added phrase in ADR-0014 at the parent and at the target, listing every ADR-0014 line that names the worker or another process together with a parse, tokenizer, JSON or image term, plus `git diff`, a search of the mirror documents, and PR #20's body and reviews.
+The full probe output is attached to the CAN-6 story as `CAN-6-qa-assertions-round-2.txt`.
+Line numbers below are in `docs/adr/0014-model-credentials-gateway-and-subscriptions.md` at the target unless another file is named.
 
 ## Verdicts
 
 | Item | Verdict | Evidence at the target |
 |---|---|---|
-| AC1 compromise bullet names the strict JSON request parser and the tokenizers | verified | ADR-0014:252: "the code that parses sandbox-controlled bytes (... request bodies in the strict JSON request parser, request text in the tokenizers, ...)"; both phrases are absent at the parent. |
-| AC2 ADR states whether the image token formula parses image bytes; bullet names it | verified | ADR-0014:48: "Where that formula takes an image's pixel width and height, the proxy process reads them by parsing the sandbox-controlled image bytes the request carries, so applying it parses image data (Consequences); a formula that bills a flat amount per image needs no such parse."; ADR-0014:252 names "image data for the image token formula". |
-| AC3 parsers run in the proxy process; no sentence places them in the worker or another process | pending owner ruling | ADR-0014:90 places them in the session proxy process; ADR-0014:200-201 runs the same gateway, with "the same message set, budget rules and journal", in `cantiere-gateway` for the server's own model calls; the readings and their verdicts are in the CAN-6 QA evidence comment. |
-| AC4 every other first-release sandbox-byte parser named; PR lists the sections checked | verified | ADR-0014:252 also names TLS, HTTP, GraphQL, git push commands and packs, and model response bodies and streams with their usage; no other first-release parse of sandbox-controlled bytes in the proxy process appears in ADR-0014; the PR #20 body lists the sections checked, Context through Alternatives considered. |
-| AC5 `docs/architecture.md` and `docs/requirements.md` checked | verified | `docs/architecture.md` has no match for compromis, tokeniz or sandbox-controlled; `docs/requirements.md:254` (COST-2) says only "a compromise of the gateway process is outside this guarantee", with no parser list; the PR #20 body lists both documents. |
-| DoD1 root cause identified | verified | The bullet predated the gateway's JSON, tokenizer and image steps; the fix names the whole first-release parser set, not only the two reported. |
-| DoD2 fix verified against the original failing case | verified | Parent ADR-0014:250 read "parses sandbox-controlled TLS, HTTP, GraphQL, git packs or model streams"; target ADR-0014:252 names the missing parsers. |
+| AC1 compromise bullet names the strict JSON request parser and the tokenizers | verified | Line 252: "the code that parses sandbox-controlled bytes (... request bodies in the strict JSON request parser, request text in the tokenizers, ...)"; each phrase counts 0 at the parent and 1 at the target. |
+| AC2 ADR states whether the image token formula parses image bytes; bullet names it | verified | Line 48: "Where that formula takes an image's pixel width and height, the proxy process reads them by parsing the sandbox-controlled image bytes the request carries, so applying it parses image data (Consequences); a formula that bills a flat amount per image needs no such parse."; line 252 names "image data for the image token formula". |
+| AC3 (amended 2026-11-17) parsers run in the proxy process; no sentence places them in the worker or in another process that handles sandbox-controlled bytes | verified | Line 90: "The gateway's strict JSON request parser, its tokenizers and its image parsing (above) run in this process with the rest of the gateway; the worker never parses a session's model requests." Every other line that names the worker with a parse is context (line 12), the journal parse (line 170), the compromise bullet's comparison "as an escape into the worker would have been with an in-worker gateway" (line 252), or the rejected in-worker alternative (line 279). The only other process that runs the gateway is `cantiere-gateway` (lines 200-201), for "Model calls the server makes itself, outside any session"; the AC3 amendment (CAN-6 comment "Acceptance criterion amendment", 2026-11-17) rules these calls out of scope: "The server's own gateway-only model calls (`cantiere-gateway`, same binary, ADR-0014 lines ~200-201) carry no sandbox-controlled bytes, so they are outside AC3." |
+| AC4 every other first-release sandbox-byte parser named; PR lists the sections checked | verified | Line 252 also names TLS, HTTP, GraphQL, git push commands and packs, and model response bodies and streams with their usage; no other first-release parse of sandbox-controlled bytes in the proxy process appears in ADR-0014; the PR #20 body, "ADR-0014 sections checked (AC4)", lists Context through Alternatives considered. |
+| AC5 `docs/architecture.md` and `docs/requirements.md` checked | verified | Neither file restates the compromise-path list: `docs/architecture.md:182` mentions only "the parser" for unknown usage fields in test 9b, and `docs/requirements.md:254` (COST-2) says only "a compromise of the gateway process is outside this guarantee"; the target changes neither file, and the PR #20 body, "Mirror documents (AC5)", lists both. |
+| DoD1 root cause identified | verified | The parent bullet predated the gateway's JSON, tokenizer and image steps; the fix names the whole first-release parser set, not only the two reported. |
+| DoD2 fix verified against the original failing case | verified | Parent line 250 read "parses sandbox-controlled TLS, HTTP, GraphQL, git packs or model streams"; target line 252 names the missing parsers. |
 | DoD3 regression protection | verified | The absence is justified in PR #20: "no in-repo check enforces the parser enumeration (docs-only repo with no CI)". |
-| DoD4 independently reviewed | verified | PR #20 review of record (COMMENTED, Codex GPT-6.1 Sol reviewer, DeepSeek V4.1 Flash adjudicator) covers head `2225b25bb0c58c2b91d2adac3139924bcc50a1fd`, the head the PR merged at, with a clean verdict. |
-| DoD5 docs updated | verified | The non-obvious constraints are encoded in ADR-0014:48 (the conditional image parse) and ADR-0014:90 (the parser placement). |
-| DoD6 no new regressions | verified | One file changed, 3 insertions and 1 deletion; no em dash; `git diff --check` is clean; the only other `docs/` list of parsed formats, ADR-0004:11, is a non-exhaustive context line outside AC5. |
+| DoD4 independently reviewed | verified | PR #20's latest review of record (COMMENTED, Codex GPT-6.1 Sol reviewer, DeepSeek V4.1 Flash adjudicator) covers `2225b25bb0c58c2b91d2adac3139924bcc50a1fd`, the head PR #20 merged at, with the verdict "clean". |
+| DoD5 docs updated | verified | The non-obvious constraints are encoded in line 48 (the conditional image parse) and line 90 (the parser placement). |
+| DoD6 no new regressions | verified | One file changed, 3 insertions and 1 deletion; no em dash in ADR-0014; `git diff --check` exits 0; the mirror documents are unchanged. |
