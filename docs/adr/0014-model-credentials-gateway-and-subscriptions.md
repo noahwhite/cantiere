@@ -223,6 +223,7 @@ The terms differ by vendor:
 - The proxy is Caddy, pinned at v2.11.9; no release before v2.11.5 is used ([GHSA-6365-7ppr-5r92](https://github.com/caddyserver/caddy/security/advisories/GHSA-6365-7ppr-5r92)).
   Its generated configuration:
   - keeps upstream certificate verification on, as it is by default, and leaves the TLS server name at its default, the upstream's hostname;
+  - sets the upstream `Host` header on each listener explicitly to the bare hostname, with no port, since Caddy's default for an HTTPS upstream is the upstream's host and port;
   - names each upstream in the `tcp4/` network form, so the proxy never dials IPv6;
   - sets `network_proxy none` on each upstream transport, so the proxy ignores any `HTTPS_PROXY` setting in its environment;
   - turns the admin endpoint off;
