@@ -1,0 +1,27 @@
+name: Requirements exports
+
+# Fails when docs/requirements.docx or docs/requirements.pdf no longer matches docs/requirements.md.
+# The fix is to run scripts/export-requirements.sh and commit the regenerated exports.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Exports match requirements.md
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: Regenerate the exports and compare their text
+        run: scripts/export-requirements.sh --check
