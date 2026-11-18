@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-10-07
 - Updated: 2026-10-21 - the gateway runs in a per-session unprivileged proxy process whose confinement, channel, policy exchange and budget bounds are specified, and the build-vs-reuse evaluation of existing gateways is recorded
-- Updated: 2026-11-17 - the gateway-only service's upstream hosts are those of the providers in the model secrets it holds, not the price table, and it reaches them only through Caddy as a pinned-upstream reverse proxy that terminates its connection, replacing its direct connections on port 443 to addresses in an nftables set its resolver filled
+- Updated: 2026-11-17 - the gateway-only service's upstream hosts are those of the providers in the model secrets it holds, not hosts in the price table, and the service reaches them only through Caddy, a pinned-upstream reverse proxy that terminates the service's connection; previously the service connected directly on port 443 to addresses in an nftables set that the gateway's resolver filled
 - Requirements: COST-1, COST-2, COST-3, RT-3, ID-2, ID-4, OBS-1, KN-2; open question "Do Claude Code and Codex subscription terms allow headless use from a self-hosted multi-session server?"; Phase 0 item "test broker-held subscription credentials"
 
 ## Context
