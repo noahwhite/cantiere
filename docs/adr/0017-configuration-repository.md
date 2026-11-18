@@ -18,7 +18,7 @@ Cantiere reads configuration from Git, at a pinned commit, in two places:
    - `workflows/` (Phase 2);
    - `skills/` or a reference to an external skills repo, mounted read-only into sandboxes (RT-4);
    - `blueprints/org.yaml`: the org-level blueprint layer;
-   - the model price table, declared private model upstreams, and provider-run tools or request fields accepted as egress (ADR-0014).
+   - the model price table, model providers with their upstream hosts, the model secrets for the server's own model calls, declared private model upstreams, and provider-run tools or request fields accepted as egress (ADR-0014).
 2. **Target repos**: `.agent/blueprint.yaml` per repo (SB-2, ADR-0008) and the repo's own `CLAUDE.md` / `AGENTS.md` (KN-1).
 
 Rules:
