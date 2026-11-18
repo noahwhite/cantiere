@@ -22,7 +22,7 @@ Line numbers below are in `docs/adr/0014-model-credentials-gateway-and-subscript
 | AC5 egress reverse proxy design | verified | Lines 215-221: Caddy in `cantiere-gateway-egress`, one listener per upstream host, plain HTTP from the gateway, TLS on port 443 to the pinned hostname with the SNI, `Host` and certificate check set by the proxy, and firewall rules that drop all other direct egress, including shared addresses; Compose at lines 217, 261-262 and 264. |
 | AC6 what the proxy sees, product, rejected alternative, cost, egress limits, relation to ADR-0011 | verified | Lines 220 and 222-223 (sees and enforces); line 224 (Caddy pinned at v2.11.9, a published release; GHSA-6365-7ppr-5r92 is patched in 2.11.5); lines 339-341 (rejected non-terminating filter and reason); lines 304-305 (accepted cost); lines 228 and 244-245 (TCP 443 to global IPv4 and its resolver, no IPv6); lines 240-242 and 343 (separate from the ADR-0011 proxy). |
 | AC7 test 9a three cases with observations | verified | `docs/architecture.md:192` cases (1) to (3), each with the observation the AC names. |
-| AC8 restatements and component listings | pending owner ruling | Met in part under both readings: `docs/requirements.md` has no restatement of the gateway-only egress rule; the proxy is in the components diagram (`docs/architecture.md:38`, `:85-88`, which parses) and the components table (`:95`); `docs/adr/0019-packaging-and-install.md:19` and `:23` list it. The open part is whether the restatements in `docs/architecture.md` are consistent; see "Pending owner ruling" below. |
+| AC8 restatements and component listings | failed | Met: `docs/requirements.md` has no restatement of the gateway-only egress rule; the proxy is in the components diagram (`docs/architecture.md:38`, `:85-88`, which parses) and the components table (`:95`); `docs/adr/0019-packaging-and-install.md:19` and `:23` list it. Not met, "any restatement is made consistent": `docs/architecture.md:86` labels the gateway-to-proxy edge "plain HTTP over loopback" and `:95` describes "one loopback listener for each of the upstream hosts", with no deployment qualifier, while ADR-0014 line 217 puts the Compose listeners "on the proxy container's address on the gateway's network" and line 262 says Compose sends "across the gateway's network instead of loopback". Nothing in the Components section scopes it to systemd; the file names Compose only in test 9a (`:192`). |
 | DoD1 root cause identified | verified | The cause was the missing declared host source, fixed at lines 37-39 and in ADR-0017 line 21. |
 | DoD2 fix verified against the original failing case | verified | The Moonshot or DeepSeek host absent from the price table is test 9a case (1). |
 | DoD3 regression protection | verified | Test 9a cases (1) to (3) are the conformance assertions. |
@@ -33,18 +33,9 @@ Line numbers below are in `docs/adr/0014-model-credentials-gateway-and-subscript
 ## Judgments
 
 Line 218 says the gateway sends "plain HTTP over loopback", in text framed for systemd; line 217 splits the systemd and Compose listeners, and line 262 says Compose sends "as under systemd, but across the gateway's network instead of loopback", so it is consistent with AC5.
-
-## Pending owner ruling
-
-Item: AC8, "any restatement is made consistent".
-`docs/architecture.md:86` labels the gateway-to-proxy edge "plain HTTP over loopback", and `:95` describes "one loopback listener for each of the upstream hosts", with no deployment qualifier; ADR-0014 line 217 puts the Compose listeners "on the proxy container's address on the gateway's network", and line 262 says Compose sends "across the gateway's network instead of loopback".
-Reading A: the components overview depicts the systemd deployment, and test 9a covers Compose, so the restatements are consistent and AC8 is verified.
-Under that reading the evidence is the diagram's DNS edge from the proxy to `cantiere-gateway-resolver` (`:87`), which holds only under systemd, since ADR-0014 line 247 says that under Compose the proxy's resolver is Docker's, and test 9a's Compose clause (`:192`).
-Reading B: `docs/architecture.md` nowhere says the overview is systemd-only, so an unqualified "loopback" restatement contradicts ADR-0014 lines 217 and 262 for Compose and AC8 fails.
-Under that reading the evidence is the unqualified text at `:86` and `:95` and the absence of any deployment scope in the Components section.
-Owner: the product owner.
+No item is pending an owner ruling.
 
 ## Outcome
 
-DoD6 failed, so the story returns to In Progress for a correction of line 6.
-AC8 is pending the owner's ruling above and is not for the engineer.
+AC8 and DoD6 failed, so the story returns to In Progress.
+The fixes are a deployment qualifier for the loopback wording at `docs/architecture.md:86` and `:95`, and a correction of ADR-0014 line 6 so it describes the change against the ADR's previous text.
