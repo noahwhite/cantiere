@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-10-07
 - Updated: 2026-10-21 - the gateway runs in a per-session unprivileged proxy process whose confinement, channel, policy exchange and budget bounds are specified, and the build-vs-reuse evaluation of existing gateways is recorded
-- Updated: 2026-11-17 - the gateway-only service's egress proxy is Caddy as a pinned-upstream reverse proxy that terminates the gateway's connection, replacing a non-terminating `CONNECT` allowlist
+- Updated: 2026-11-17 - the gateway-only service's upstream hosts are those of the providers in the model secrets it holds, and the service reaches them on global addresses only through Caddy, a pinned-upstream reverse proxy that terminates the service's connection; previously, under systemd, the service connected directly on port 443 to addresses in an nftables set that the gateway's resolver filled for the provider hosts in the price table, and under Compose it could reach port 443 on any global address
 - Requirements: COST-1, COST-2, COST-3, RT-3, ID-2, ID-4, OBS-1, KN-2; open question "Do Claude Code and Codex subscription terms allow headless use from a self-hosted multi-session server?"; Phase 0 item "test broker-held subscription credentials"
 
 ## Context
@@ -215,7 +215,7 @@ The terms differ by vendor:
 - In place of the session chain, the gateway-only service reaches upstream hosts on global addresses only through a local egress reverse proxy, Caddy, run by a companion unit, `cantiere-gateway-egress`, under its own user.
   The proxy has one listener for each of the upstream hosts of the providers in the model secrets the gateway-only service holds (API-key mode, above; ADR-0017), and each listener's upstream is that hostname on port 443, fixed in the proxy's configuration.
   Under systemd each listener is on a loopback address and is held by a socket unit, `cantiere-gateway-egress.socket`, which passes it to the proxy, so a restart of the proxy service, as distinct from the socket unit, never releases a port another local process could bind; under Compose each listener is on the proxy container's address on the gateway's network, which holds only the gateway and the proxy.
-  The gateway gets each host's listener address and port in `Init`, since its empty root holds no proxy setting, and sends each request for an upstream host as plain HTTP over loopback to that host's listener.
+  The gateway gets each host's listener address and port in `Init`, since its empty root holds no proxy setting, and sends each request for an upstream host as plain HTTP to that host's listener, over loopback under systemd and across the gateway's network under Compose.
   The proxy opens TLS to the listener's hostname on port 443 only, sets the SNI and the `Host` header to that hostname itself, and verifies the server certificate against that hostname.
   So the gateway chooses neither the destination, the SNI nor the `Host`: a request that names another host, in its `Host` header or as an absolute URI, still reaches only the listener's hostname, under that hostname, and no listener exists for a host outside that list.
   Host nftables output rules for the gateway's user accept established connections, new TCP connections to the proxy's listeners, and new TCP connections to each declared private upstream's address and port, and drop all other outbound traffic, so the service's firewall drops every direct connection from the gateway to any other address, including an address shared with a permitted upstream host, for example behind the same CDN.
